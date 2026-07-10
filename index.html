@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Merve Optik CRM</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel (In-browser JSX compilation) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS (CDN for rapid deployment) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Firebase SDK (Compat Version - Works flawlessly on local files without CORS issues) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+    </style>
+</head>
+<body class="bg-slate-100 text-gray-900 selection:bg-blue-200">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const toPascalCase = (str) =>
+            str.replace(/(^\w|-\w)/g, (m) => m.replace('-', '').toUpperCase());
+
+        const buildSvgNode = (node) => {
+            const [tag, attrs, children] = node;
+            const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+            Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+            (children || []).forEach((child) => el.appendChild(buildSvgNode(child)));
+            return el;
+        };
+
+        const Icon = ({ name, size = 24, className = '', strokeWidth = 2 }) => {
+            const iconRef = React.useRef(null);
+            React.useEffect(() => {
+                if (!iconRef.current || !window.lucide || !window.lucide.icons) return;
+
+                const pascalName = toPascalCase(name);
+                const iconNode = window.lucide.icons[pascalName];
+
+                if (!iconNode) {
+                    console.warn('Lucide ikonu bulunamadı:', name, '->', pascalName);
+                    return;
+                }
+
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+                svg.setAttribute('width', size);
+                svg.setAttribute('height', size);
+                svg.setAttribute('viewBox', '0 0 24 24');
+                svg.setAttribute('fill', 'none');
+                svg.setAttribute('stroke', 'currentColor');
+                svg.setAttribute('stroke-width', strokeWidth);
+                svg.setAttribute('stroke-linecap', 'round');
+                svg.setAttribute('stroke-linejoin', 'round');
+                if (className) svg.setAttribute('class', className);
+
+                iconNode.forEach((child) => svg.appendChild(buildSvgNode(child)));
+
+                iconRef.current.innerHTML = '';
+                iconRef.current.appendChild(svg);
+            }, [name, size, className, strokeWidth]);
+
+            return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
+        };
+
+        const PlusIcon = ({ size = 24, strokeWidth = 2, className = '' }) => (
+            <svg width={size} height={size} className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+        );
+
+        // --- Sabit Kullanıcı Listesi ---
+        const USERS = [
+            { id: 'rep1', name: 'Sedat Demir', role: 'rep', iconColor: 'bg-blue-100 text-blue-700', password: 'sedat' },
+            { id: 'rep2', name: 'Engin Kaleli', role: 'rep', iconColor: 'bg-indigo-100 text-indigo-700', password: 'engin' },
+            { id: 'manager', name: 'Yönetici', role: 'manager', iconColor: 'bg-slate-800 text-white', password: '123' }
+        ];
+
+        // --- DİKKAT: AŞAĞIDAKİ BİLGİLERİ KENDİ FİREBASE BİLGİLERİNİZLE DEĞİŞTİRİN ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCr_0GwQ3neDP-sdQECPKpLj2t_60Qa1MA",
+            authDomain: "merve-optik.firebaseapp.com",
+            projectId: "merve-optik",
+            storageBucket: "merve-optik.firebasestorage.app",
+            messagingSenderId: "584726216959",
+            appId: "1:584726216959:web:e5504139e05d92b7afccca"
+        };
+
+        // Kullanıcının config verisini doldurup doldurmadığını kontrol eden güvenlik kalkanı
+        const isDummyConfig = firebaseConfig.apiKey === "BURAYA_API_KEY_GELECEK" || firebaseConfig.apiKey.includes("AIzaSy...");
+
+        let auth = null;
+        let db = null;
+
+        if (!isDummyConfig) {
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            auth = firebase.auth();
+            db = firebase.firestore();
+        }
+
+        function App() {
+            // Eğer config sahte/boş bırakıldıysa anında uyarı ekranı göster!
+            if (isDummyConfig) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
+                        <div className="bg-white p-8 rounded-3xl shadow-xl text-center max-w-md border-t-4 border-red-500">
+                            <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <Icon name="alert-triangle" size={40} />
+                            </div>
+                            <h1 className="text-2xl font-black text-gray-800 mb-4">Eksik Kurulum!</h1>
+                            <p className="text-gray-600 font-medium leading-relaxed mb-6">
+                                Lütfen <strong className="text-gray-900">index.html</strong> dosyasını bilgisayarınızda bir Not Defteri ile açın.<br/><br/>
+                                <strong className="text-blue-600">firebaseConfig</strong> yazan kısıma (100. satır civarı) kendi Firebase ayarlarınızı yapıştırıp kaydedin.
+                            </p>
+                        </div>
+                    </div>
+                );
+            }
+
+            const [firebaseUser, setFirebaseUser] = React.useState(null);
+            
+            const [activeProfile, setActiveProfile] = React.useState(() => {
+                const saved = localStorage.getItem('crm_active_profile');
+                return saved ? JSON.parse(saved) : null;
+            });
+
+            const [doctors, setDoctors] = React.useState([]);
+            const [visits, setVisits] = React.useState([]);
+            const [loading, setLoading] = React.useState(true);
+
+            // UI State
+            const [activeTab, setActiveTab] = React.useState('doctors');
+            const [isAddDoctorOpen, setIsAddDoctorOpen] = React.useState(false);
+            const [visitingDoctor, setVisitingDoctor] = React.useState(null); 
+            const [isQuickVisitOpen, setIsQuickVisitOpen] = React.useState(false);
+            const [quickSearchTerm, setQuickSearchTerm] = React.useState('');
+            const [searchTerm, setSearchTerm] = React.useState('');
+            const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+            
+            // Login State
+            const [loginStep, setLoginStep] = React.useState('select_profile');
+            const [selectedProfileForLogin, setSelectedProfileForLogin] = React.useState(null);
+            const [passwordInput, setPasswordInput] = React.useState('');
+            
+            const [toast, setToast] = React.useState({ show: false, message: '', type: 'success' });
+
+            const [newDoctor, setNewDoctor] = React.useState({ type: 'hekim', name: '', hospital: '', city: '' });
+            const todayISO = new Date().toISOString().split('T')[0];
+            const [newVisit, setNewVisit] = React.useState({ date: todayISO, notes: '' });
+
+            React.useEffect(() => {
+                auth.signInAnonymously().catch(error => {
+                    console.error("Auth Error:", error);
+                    showToast("Veritabanına bağlanılamadı. Ayarları kontrol edin.", "error");
+                });
+
+                const unsubscribe = auth.onAuthStateChanged((user) => {
+                    setFirebaseUser(user);
+                });
+
+                return () => unsubscribe();
+            }, []);
+
+            React.useEffect(() => {
+                if (!firebaseUser || !activeProfile) {
+                    setLoading(false);
+                    return;
+                }
+
+                setLoading(true);
+                const unsubDoctors = db.collection('doctors').onSnapshot((snapshot) => {
+                    const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    docs.sort((a, b) => {
+                        const hospitalCompare = a.hospital.localeCompare(b.hospital, 'tr-TR');
+                        if (hospitalCompare !== 0) return hospitalCompare;
+                        return a.name.localeCompare(b.name, 'tr-TR');
+                    });
+                    setDoctors(docs);
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Error fetching doctors:", error);
+                    setLoading(false);
+                });
+
+                const unsubVisits = db.collection('visits').onSnapshot((snapshot) => {
+                    const v = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    v.sort((a, b) => b.createdAt - a.createdAt);
+                    setVisits(v);
+                }, (error) => {
+                    console.error("Error fetching visits:", error);
+                });
+
+                return () => {
+                    unsubDoctors();
+                    unsubVisits();
+                };
+            }, [firebaseUser, activeProfile]);
+
+            const showToast = (message, type = 'success') => {
+                setToast({ show: true, message, type });
+                setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
+            };
+
+            const handleProfileSelect = (profile) => {
+                setSelectedProfileForLogin(profile);
+                setLoginStep('password_prompt');
+                setPasswordInput('');
+            };
+
+            const handlePasswordSubmit = (e) => {
+                e.preventDefault();
+                if (passwordInput === selectedProfileForLogin.password) {
+                    executeLogin(selectedProfileForLogin);
+                } else {
+                    showToast('Hatalı şifre girdiniz!', 'error');
+                    setPasswordInput('');
+                }
+            };
+
+            const executeLogin = (profile) => {
+                setActiveProfile(profile);
+                localStorage.setItem('crm_active_profile', JSON.stringify(profile));
+                setActiveTab(profile.role === 'manager' ? 'manager-dashboard' : 'doctors');
+                setLoginStep('select_profile');
+                setSelectedProfileForLogin(null);
+            };
+
+            const handleLogout = () => {
+                setActiveProfile(null);
+                localStorage.removeItem('crm_active_profile');
+                setIsMobileMenuOpen(false);
+            };
+
+            const handleAddDoctor = async (e) => {
+                e.preventDefault();
+                if (newDoctor.type === 'hekim') {
+                    if (!firebaseUser || !newDoctor.name.trim() || !newDoctor.hospital.trim() || !newDoctor.city.trim()) {
+                        showToast('Lütfen tüm alanları doldurun.', 'error');
+                        return;
+                    }
+                } else {
+                    if (!firebaseUser || !newDoctor.name.trim() || !newDoctor.city.trim()) {
+                        showToast('Lütfen optik adını ve şehrini doldurun.', 'error');
+                        return;
+                    }
+                }
+
+                try {
+                    const dataToSave = {
+                        type: newDoctor.type,
+                        name: newDoctor.name,
+                        hospital: newDoctor.type === 'optik' ? 'Optik' : newDoctor.hospital,
+                        city: newDoctor.city,
+                        addedByProfileId: activeProfile.id,
+                        addedBy: firebaseUser.uid,
+                        addedByName: activeProfile.name,
+                        createdAt: Date.now()
+                    };
+
+                    await db.collection('doctors').add(dataToSave);
+                    setNewDoctor({ type: 'hekim', name: '', hospital: '', city: '' });
+                    setIsAddDoctorOpen(false);
+                    showToast(`${dataToSave.type === 'optik' ? 'Optik' : 'Göz Hekimi'} havuza başarıyla eklendi.`);
+                } catch (error) {
+                    console.error("Error adding doctor:", error);
+                    showToast('Kayıt eklenirken bir hata oluştu.', 'error');
+                }
+            };
+
+            const handleDeleteDoctor = async (doctorId) => {
+                if (!firebaseUser) return;
+                const doctorToDelete = doctors.find(d => d.id === doctorId);
+                if (!doctorToDelete) return;
+
+                if (doctorToDelete.addedByProfileId !== activeProfile.id && activeProfile.role !== 'manager') {
+                    showToast('Sadece kendi eklediğiniz kontakları silebilirsiniz.', 'error');
+                    return;
+                }
+
+                try {
+                    await db.collection('doctors').doc(doctorId).delete();
+                    showToast('Kontak havuzdan silindi.');
+                } catch (error) {
+                    console.error("Error deleting doctor:", error);
+                    showToast('Kontak silinirken bir hata oluştu.', 'error');
+                }
+            };
+
+            const handleAddVisit = async (e) => {
+                e.preventDefault();
+                if (!firebaseUser || !visitingDoctor || !newVisit.date) return;
+
+                if (newVisit.date > todayISO) {
+                    showToast('İleri bir tarihe ziyaret kaydı giremezsiniz!', 'error');
+                    return;
+                }
+
+                try {
+                    const isDuplicate = visits.some(visit => 
+                        visit.repId === activeProfile.id && 
+                        visit.doctorId === visitingDoctor.id && 
+                        visit.date === newVisit.date
+                    );
+
+                    if (isDuplicate) {
+                        showToast('Uyarı: Bu kontağa bugün zaten bir ziyaret kaydı girdiniz!', 'error');
+                        return;
+                    }
+
+                    await db.collection('visits').add({
+                        doctorId: visitingDoctor.id,
+                        doctorType: visitingDoctor.type || 'hekim',
+                        doctorName: visitingDoctor.name,
+                        doctorHospital: visitingDoctor.hospital,
+                        repId: activeProfile.id,
+                        repName: activeProfile.name,
+                        date: newVisit.date,
+                        notes: newVisit.notes,
+                        createdAt: Date.now()
+                    });
+                    
+                    setVisitingDoctor(null);
+                    setIsQuickVisitOpen(false);
+                    setNewVisit({ date: todayISO, notes: '' });
+                    showToast('Ziyaret başarıyla kaydedildi.');
+
+                } catch (error) {
+                    console.error("Error adding visit:", error);
+                    showToast('Ziyaret kaydedilirken bir hata oluştu.', 'error');
+                }
+            };
+
+            const handleDeleteVisit = async (visitId) => {
+                if (!firebaseUser) return;
+                try {
+                    await db.collection('visits').doc(visitId).delete();
+                    showToast('Ziyaret kaydı silindi.');
+                } catch (error) {
+                    console.error("Error deleting visit:", error);
+                }
+            };
+
+            const downloadReport = () => {
+                if (visits.length === 0) return;
+                const headers = ['Tarih', 'Temsilci', 'Tür', 'Kontak Adı', 'Kurum/Hastane', 'Notlar'];
+                const csvData = visits.map(visit => {
+                    const safeNotes = visit.notes ? `"${visit.notes.replace(/"/g, '""')}"` : '""';
+                    const safeDoctor = `"${visit.doctorName}"`;
+                    const safeHospital = `"${visit.doctorHospital}"`;
+                    const safeRep = `"${visit.repName}"`;
+                    const contactType = visit.doctorType === 'optik' ? '"Optik"' : '"Hekim"';
+                    const formattedDate = new Date(visit.date).toLocaleDateString('tr-TR');
+                    return [formattedDate, safeRep, contactType, safeDoctor, safeHospital, safeNotes].join(';');
+                });
+                const csvContent = [headers.join(';'), ...csvData].join('\n');
+                const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', `Ziyaret_Raporu_${todayISO}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const myDoctors = doctors.filter(doc => 
+                activeProfile?.role === 'manager' || doc.addedByProfileId === activeProfile?.id
+            );
+
+            const filteredDoctors = myDoctors.filter(doc => 
+                doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                doc.hospital.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (doc.city && doc.city.toLowerCase().includes(searchTerm.toLowerCase()))
+            );
+
+            const quickSearchDoctors = myDoctors.filter(doc => 
+                doc.name.toLowerCase().includes(quickSearchTerm.toLowerCase()) ||
+                doc.hospital.toLowerCase().includes(quickSearchTerm.toLowerCase())
+            ).slice(0, 10);
+
+            const myVisits = visits.filter(v => v.repId === activeProfile?.id);
+
+            const renderLoginScreen = () => (
+                <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+                    <div className="w-full max-w-sm">
+                        <div className="text-center mb-10">
+                            <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-blue-800 rounded-3xl flex items-center justify-center shadow-xl shadow-blue-200 mx-auto mb-6 transform rotate-3">
+                                <Icon name="activity" className="text-white" size={40} />
+                            </div>
+                            <h1 className="font-black text-3xl tracking-tight text-slate-800 mb-2">Merve Optik CRM</h1>
+                            <p className="text-slate-500 font-medium">Saha Yönetim Sistemi</p>
+                        </div>
+
+                        {loginStep === 'select_profile' ? (
+                            <div className="space-y-4">
+                                <p className="text-sm font-bold text-slate-400 uppercase tracking-wider text-center mb-2">GİRİŞ YAPILACAK PROFİLİ SEÇİN</p>
+                                {USERS.map((profile) => (
+                                    <button
+                                        key={profile.id}
+                                        onClick={() => handleProfileSelect(profile)}
+                                        className="w-full bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:border-blue-300 transition-all active:scale-[0.98] group"
+                                    >
+                                        <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl ${profile.iconColor}`}>
+                                            {profile.role === 'manager' ? <Icon name="activity" size={24}/> : profile.name.charAt(0)}
+                                        </div>
+                                        <div className="flex-1 text-left">
+                                            <p className="font-bold text-slate-800 text-lg">{profile.name}</p>
+                                            <p className="text-sm text-slate-500">{profile.role === 'manager' ? 'Yönetici Paneli' : 'Saha Temsilcisi'}</p>
+                                        </div>
+                                        <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600">
+                                            <Icon name="lock" size={18} />
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                                <div className="flex flex-col items-center text-center mb-6">
+                                    <div className={`w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold mb-4 shadow-lg shadow-slate-200 ${selectedProfileForLogin.iconColor}`}>
+                                        {selectedProfileForLogin.role === 'manager' ? <Icon name="lock" size={28} /> : selectedProfileForLogin.name.charAt(0)}
+                                    </div>
+                                    <h2 className="text-xl font-bold text-slate-800">{selectedProfileForLogin.name} Girişi</h2>
+                                    <p className="text-sm text-slate-500 mt-1">Lütfen devam etmek için şifrenizi girin.</p>
+                                </div>
+                                <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                                    <input
+                                        type="password"
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-center text-xl tracking-widest focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono font-bold text-slate-700"
+                                        placeholder="••••••••"
+                                        value={passwordInput}
+                                        onChange={(e) => setPasswordInput(e.target.value)}
+                                        autoFocus
+                                    />
+                                    <div className="flex gap-3 pt-2">
+                                        <button type="button" onClick={() => setLoginStep('select_profile')} className="flex-1 px-4 py-3.5 bg-slate-100 text-slate-600 rounded-xl font-bold active:scale-95 transition-all">Geri</button>
+                                        <button type="submit" disabled={!passwordInput} className="flex-[2] px-4 py-3.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all disabled:opacity-50">Giriş Yap</button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+
+            const renderLoadingSpinner = () => (
+                <div className="flex justify-center items-center h-full min-h-[50vh]">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+                </div>
+            );
+
+            const renderToast = () => {
+                if (!toast.show) return null;
+                return (
+                    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4">
+                        <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg border ${toast.type === 'error' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-emerald-50 border-emerald-100 text-emerald-800'}`}>
+                            {toast.type === 'error' ? <Icon name="alert-circle" size={20} className="shrink-0"/> : <Icon name="check-circle-2" size={20} className="shrink-0"/>}
+                            <p className="font-medium text-sm leading-tight">{toast.message}</p>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderAddDoctorModal = () => (
+                <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm transition-all">
+                    <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+                        <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden"></div>
+                        <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
+                            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg mr-3"><Icon name="user-plus" size={20} /></div> 
+                            Yeni Kontak Ekle
+                        </h2>
+                        
+                        <form onSubmit={handleAddDoctor} className="space-y-4">
+                            <div className="flex bg-slate-100 p-1 rounded-xl w-full mb-6">
+                                <button 
+                                    type="button"
+                                    onClick={() => setNewDoctor({...newDoctor, type: 'hekim', hospital: ''})}
+                                    className={`flex-1 py-3 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${newDoctor.type === 'hekim' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+                                >
+                                    <Icon name="user-circle" size={18} /> Hekim
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => setNewDoctor({...newDoctor, type: 'optik', hospital: 'Optik'})} 
+                                    className={`flex-1 py-3 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${newDoctor.type === 'optik' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+                                >
+                                    <Icon name="glasses" size={18} /> Optik
+                                </button>
+                            </div>
+
+                            {newDoctor.type === 'hekim' ? (
+                                <>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">AD SOYAD (ÜNVAN İLE)</label>
+                                    <input required type="text" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="Örn: Dr. Ahmet Yılmaz" value={newDoctor.name} onChange={e => setNewDoctor({...newDoctor, name: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">HASTANE / KLİNİK</label>
+                                    <input required type="text" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="Örn: Şehir Hastanesi" value={newDoctor.hospital} onChange={e => setNewDoctor({...newDoctor, hospital: e.target.value})} />
+                                </div>
+                                </>
+                            ) : (
+                                <>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">OPTİK ADI</label>
+                                    <input required type="text" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="Örn: Lider Optik" value={newDoctor.name} onChange={e => setNewDoctor({...newDoctor, name: e.target.value})} />
+                                </div>
+                                </>
+                            )}
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">ŞEHİR / İLÇE</label>
+                                <input required type="text" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="Örn: Ankara, Çankaya" value={newDoctor.city} onChange={e => setNewDoctor({...newDoctor, city: e.target.value})} />
+                            </div>
+                            <div className="flex gap-3 pt-6 pb-2">
+                                <button type="button" onClick={() => setIsAddDoctorOpen(false)} className="flex-1 px-4 py-3.5 bg-gray-100 text-gray-700 rounded-xl font-bold active:scale-95 transition-all">İptal</button>
+                                <button type="submit" className="flex-[2] px-4 py-3.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all">Kontak Ekle</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+
+            const renderAddVisitModal = () => (
+                <div className="fixed inset-0 bg-black/60 z-[70] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6">
+                        <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden"></div>
+                        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg mr-3"><Icon name="calendar-plus" size={20} /></div> 
+                            Ziyaret Kaydı Oluştur
+                        </h2>
+                        
+                        <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-start gap-3">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg shrink-0 ${visitingDoctor?.type === 'optik' ? 'bg-indigo-100 text-indigo-600' : 'bg-blue-100 text-blue-600'}`}>
+                                {visitingDoctor?.type === 'optik' ? <Icon name="glasses" size={20}/> : visitingDoctor?.name.charAt(0)}
+                            </div>
+                            <div>
+                                <span className="font-bold text-slate-800 block text-lg leading-tight mb-1">{visitingDoctor?.name}</span>
+                                <span className="text-sm text-slate-500 flex items-center gap-1"><Icon name="building" size={12}/> {visitingDoctor?.hospital}</span>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleAddVisit} className="space-y-5">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">ZİYARET TARİHİ</label>
+                                <input required type="date" max={todayISO} className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-gray-800 font-medium" value={newVisit.date} onChange={e => setNewVisit({...newVisit, date: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">GÖRÜŞME NOTLARI (OPSİYONEL)</label>
+                                <textarea rows="3" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-gray-800 resize-none" placeholder="Görüşme nasıl geçti? Detaylar..." value={newVisit.notes} onChange={e => setNewVisit({...newVisit, notes: e.target.value})}></textarea>
+                            </div>
+                            <div className="flex gap-3 pt-4 pb-2">
+                                <button type="button" onClick={() => setVisitingDoctor(null)} className="flex-1 px-4 py-3.5 bg-gray-100 text-gray-700 rounded-xl font-bold active:scale-95 transition-all">Vazgeç</button>
+                                <button type="submit" className="flex-[2] px-4 py-3.5 bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-200 active:scale-95 transition-all flex justify-center items-center gap-2">
+                                    <Icon name="calendar-plus" size={18}/> Ziyareti Kaydet
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+
+            const renderQuickVisitModal = () => (
+                <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm transition-all">
+                    <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6 h-[85vh] sm:h-auto sm:max-h-[85vh] flex flex-col">
+                        <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden shrink-0"></div>
+                        <div className="flex justify-between items-center mb-6 shrink-0">
+                            <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg mr-3"><Icon name="calendar-plus" size={20} /></div> 
+                                Hızlı Ziyaret Ekle
+                            </h2>
+                            <button onClick={() => setIsQuickVisitOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold bg-gray-100 px-3 py-1.5 rounded-lg text-sm">Kapat</button>
+                        </div>
+
+                        <div className="relative mb-4 shrink-0">
+                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                <Icon name="search" size={20} className="text-gray-400" />
+                            </div>
+                            <input
+                                type="text"
+                                className="block w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 text-base outline-none"
+                                placeholder="Kontak ara (Hekim, Optik)..."
+                                value={quickSearchTerm}
+                                onChange={(e) => setQuickSearchTerm(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto -mx-2 px-2 pb-2">
+                            {quickSearchTerm === '' ? (
+                                <div className="py-12 text-center text-gray-400 flex flex-col items-center">
+                                    <Icon name="search" size={40} className="mb-3 opacity-20" />
+                                    <p>Havuza ekli kontağı bulmak için isim veya kurum yazın.</p>
+                                </div>
+                            ) : quickSearchDoctors.length === 0 ? (
+                                <div className="py-12 text-center text-gray-500">
+                                    <p className="font-bold text-gray-700">Kayıt bulunamadı.</p>
+                                    <p className="text-sm mt-2">Önce "Kontaklar" sekmesinden havuza eklemeniz gerekebilir.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {quickSearchDoctors.map(doctor => (
+                                        <button 
+                                            key={doctor.id}
+                                            onClick={() => {
+                                                setVisitingDoctor(doctor);
+                                                setIsQuickVisitOpen(false);
+                                                setQuickSearchTerm('');
+                                            }}
+                                            className="w-full p-4 flex items-center justify-between bg-white border border-gray-100 rounded-xl hover:border-emerald-300 hover:shadow-sm active:scale-[0.98] transition-all text-left group"
+                                        >
+                                            <div className="flex-1 pr-4">
+                                                <h3 className="font-bold text-gray-900 text-[15px] mb-0.5 flex items-center gap-2">
+                                                    {doctor.name}
+                                                    {doctor.type === 'optik' ? <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">OPTİK</span> : null}
+                                                </h3>
+                                                <div className="text-xs text-gray-500 flex items-center gap-1">
+                                                    <Icon name="building" size={12} className="shrink-0"/>
+                                                    <span className="truncate">{doctor.hospital}</span>
+                                                </div>
+                                            </div>
+                                            <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0">
+                                                <Icon name="chevron-right" size={18} />
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderRepDashboard = () => (
+                <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6 pb-24 sm:pb-0">
+                    <div className="hidden sm:flex bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 p-1 mb-6">
+                        <button onClick={() => setActiveTab('doctors')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'doctors' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>
+                            <Icon name="users" size={18} /> Kontaklar ({myDoctors.length})
+                        </button>
+                        <button onClick={() => setActiveTab('my-visits')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'my-visits' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>
+                            <Icon name="clipboard-list" size={18} /> Ziyaretlerim ({myVisits.length})
+                        </button>
+                    </div>
+
+                    {activeTab === 'doctors' && (
+                        <div>
+                            <div className="sticky top-16 sm:top-0 z-20 bg-slate-100 pt-2 pb-4 -mx-4 px-4 sm:mx-0 sm:px-0 sm:bg-transparent">
+                                <div className="flex gap-2">
+                                    <div className="relative flex-1">
+                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                            <Icon name="search" size={20} className="text-gray-400" />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            className="block w-full pl-12 pr-4 py-3.5 bg-white border-none shadow-sm rounded-2xl focus:ring-2 focus:ring-blue-500 text-base outline-none"
+                                            placeholder="Hekim, optik, hastane veya şehir ara..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={() => setIsAddDoctorOpen(true)}
+                                        className="bg-blue-600 text-white w-14 h-[52px] rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 active:scale-95 transition-all shrink-0 sm:w-auto sm:px-6 sm:gap-2 font-bold"
+                                    >
+                                        <Icon name="user-plus" size={24} />
+                                        <span className="hidden sm:inline">Kontak Ekle</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mt-2 overflow-hidden divide-y divide-gray-100">
+                                {filteredDoctors.length === 0 ? (
+                                    <div className="py-16 text-center text-gray-500">
+                                        <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <Icon name="search" size={32} className="text-gray-300" />
+                                        </div>
+                                        <p className="font-bold text-lg text-gray-700">Kayıt bulunamadı</p>
+                                        <p className="text-sm mt-1">Sistemde aradığınız kriterde kontak yok.</p>
+                                    </div>
+                                ) : (
+                                    filteredDoctors.map(doctor => (
+                                        <div key={doctor.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors active:bg-slate-100 group">
+                                            <div className="flex-1 pr-4">
+                                                <h3 className="font-bold text-gray-900 text-[16px] leading-tight mb-1 flex items-center gap-2">
+                                                    {doctor.name}
+                                                    {doctor.type === 'optik' ? (
+                                                        <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded flex items-center gap-1"><Icon name="glasses" size={10}/> OPTİK</span>
+                                                    ) : (
+                                                        <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">HEKİM</span>
+                                                    )}
+                                                </h3>
+                                                <div className="text-sm text-gray-500 flex items-center gap-1.5">
+                                                    <Icon name="building" size={14} className="shrink-0 text-gray-400"/>
+                                                    <span className="truncate font-medium">{doctor.hospital}</span>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="flex items-center gap-2">
+                                                {(doctor.addedByProfileId === activeProfile.id || activeProfile.role === 'manager') && (
+                                                    <button 
+                                                        onClick={() => handleDeleteDoctor(doctor.id)}
+                                                        className="w-10 h-10 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl flex items-center justify-center shrink-0 active:scale-95 transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                                                        title="Kontağı Sil"
+                                                    >
+                                                        <Icon name="trash-2" size={18} />
+                                                    </button>
+                                                )}
+
+                                                <button 
+                                                    onClick={() => setVisitingDoctor(doctor)}
+                                                    className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center shrink-0 active:scale-95 transition-transform hover:bg-emerald-100"
+                                                    title="Ziyaret Ekle"
+                                                >
+                                                    <Icon name="calendar-plus" size={22} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'my-visits' && (
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-end mb-2 px-1">
+                                <h2 className="text-xl font-bold text-gray-800">Geçmiş Ziyaretlerim</h2>
+                                <span className="text-sm font-bold text-blue-600 bg-blue-100 px-3 py-1 rounded-lg">{myVisits.length} Kayıt</span>
+                            </div>
+                            
+                            <div className="space-y-3">
+                                {myVisits.length === 0 ? (
+                                    <div className="py-20 text-center bg-white rounded-2xl shadow-sm border border-gray-100">
+                                        <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <Icon name="clipboard-list" size={32} className="text-emerald-400" />
+                                        </div>
+                                        <p className="font-bold text-gray-700 text-lg">Henüz ziyaret yok</p>
+                                        <p className="text-gray-500 text-sm mt-1 max-w-[250px] mx-auto">Alttaki <strong className="text-emerald-600">+</strong> butonuna basarak ilk ziyaretinizi kaydedin.</p>
+                                    </div>
+                                ) : (
+                                    myVisits.map(visit => (
+                                        <div key={visit.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative group overflow-hidden">
+                                            <div className="flex justify-between items-start mb-3 pr-10">
+                                                <div>
+                                                    <h3 className="font-bold text-gray-900 text-[17px] mb-1 flex items-center gap-2">
+                                                        {visit.doctorName}
+                                                        {visit.doctorType === 'optik' ? <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">OPTİK</span> : null}
+                                                    </h3>
+                                                    <p className="text-sm text-gray-500 flex items-center gap-1.5"><Icon name="building" size={14}/> {visit.doctorHospital}</p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <span className="block text-sm font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                                                        {new Date(visit.date).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            
+                                            {visit.notes && (
+                                                <div className="bg-yellow-50/50 rounded-xl p-3 mt-3 border border-yellow-100/50">
+                                                    <p className="text-sm text-slate-700 leading-relaxed"><span className="font-bold text-yellow-700 mr-1 text-xs uppercase">Not:</span>{visit.notes}</p>
+                                                </div>
+                                            )}
+
+                                            <button 
+                                                onClick={() => handleDeleteVisit(visit.id)}
+                                                className="absolute top-4 right-4 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                                            >
+                                                <Icon name="trash-2" size={20} />
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+
+            const renderManagerDashboard = () => (
+                <div className="max-w-6xl mx-auto space-y-6 pb-24 sm:pb-0">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+                        <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-3 sm:mb-4"><Icon name="activity" className="text-blue-600" size={24} /></div>
+                            <p className="text-xs sm:text-sm text-gray-500 font-bold uppercase tracking-wider mb-1">ZİYARETLER</p>
+                            <p className="text-2xl sm:text-3xl font-black text-gray-800">{visits.length}</p>
+                        </div>
+                        <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-emerald-100 rounded-xl flex items-center justify-center mb-3 sm:mb-4"><Icon name="users" className="text-emerald-600" size={24} /></div>
+                            <p className="text-xs sm:text-sm text-gray-500 font-bold uppercase tracking-wider mb-1">HEKİM & OPTİK</p>
+                            <p className="text-2xl sm:text-3xl font-black text-gray-800">{doctors.length}</p>
+                        </div>
+                        <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-gray-100 col-span-2 md:col-span-1 flex flex-row md:flex-col items-center md:items-start justify-between">
+                            <div>
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-0 md:mb-4 hidden md:flex"><Icon name="user-circle" className="text-purple-600" size={24} /></div>
+                                <p className="text-xs sm:text-sm text-gray-500 font-bold uppercase tracking-wider mb-1">TEMSİLCİ</p>
+                                <p className="text-2xl sm:text-3xl font-black text-gray-800">{new Set(visits.map(v => v.repId)).size}</p>
+                            </div>
+                            <button onClick={downloadReport} disabled={visits.length === 0} className="bg-emerald-600 text-white px-5 py-3 rounded-xl font-bold shadow-sm active:scale-95 transition-all flex items-center gap-2">
+                                <Icon name="download" size={20} /> <span className="hidden sm:inline">Rapor İndir</span><span className="sm:hidden">İndir</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 p-1 mb-4">
+                        <button onClick={() => setActiveTab('manager-dashboard')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'manager-dashboard' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>
+                            <Icon name="activity" size={18} /> Ziyaret Akışı
+                        </button>
+                        <button onClick={() => setActiveTab('manager-doctors')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'manager-doctors' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>
+                            <Icon name="users" size={18} /> Tüm Kontaklar ({doctors.length})
+                        </button>
+                    </div>
+
+                    {activeTab === 'manager-dashboard' && (
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                            <div className="p-4 sm:p-6 border-b border-gray-100 bg-slate-50/50 flex justify-between items-center">
+                                <h2 className="text-lg font-bold text-gray-800">Son Ziyaret Kayıtları</h2>
+                            </div>
+                            <div className="block sm:hidden divide-y divide-gray-100">
+                                {visits.length === 0 ? (
+                                    <div className="p-8 text-center text-gray-500">Sistemde henüz kayıt yok.</div>
+                                ) : (
+                                    visits.map(visit => (
+                                        <div key={visit.id} className="p-4 space-y-3">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded">{new Date(visit.date).toLocaleDateString('tr-TR')}</span>
+                                                <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded flex items-center gap-1.5"><Icon name="user-circle" size={14}/> {visit.repName.split(' ')[0]}</span>
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-gray-900 flex items-center gap-2">
+                                                {visit.doctorName}
+                                                {visit.doctorType === 'optik' ? <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">OPTİK</span> : null}
+                                                </p>
+                                                <p className="text-xs text-gray-500 font-medium mt-0.5">{visit.doctorHospital}</p>
+                                            </div>
+                                            {visit.notes && <p className="text-sm text-gray-700 bg-slate-50 p-2.5 rounded-lg border border-slate-100">"{visit.notes}"</p>}
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            <div className="hidden sm:block overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
+                                        <tr>
+                                            <th className="px-6 py-4">Tarih</th>
+                                            <th className="px-6 py-4">Temsilci</th>
+                                            <th className="px-6 py-4">Tür</th>
+                                            <th className="px-6 py-4">Kontak / Kurum</th>
+                                            <th className="px-6 py-4 max-w-md">Notlar</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {visits.map(visit => (
+                                            <tr key={visit.id} className="hover:bg-slate-50/50 transition-colors">
+                                                <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{new Date(visit.date).toLocaleDateString('tr-TR')}</td>
+                                                <td className="px-6 py-4"><span className="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">{visit.repName}</span></td>
+                                                <td className="px-6 py-4">
+                                                    {visit.doctorType === 'optik' ? (
+                                                    <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-1 rounded">OPTİK</span>
+                                                    ) : (
+                                                    <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">HEKİM</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="font-bold text-gray-800 text-[15px]">{visit.doctorName}</div>
+                                                    <div className="text-xs text-gray-500 mt-0.5">{visit.doctorHospital}</div>
+                                                </td>
+                                                <td className="px-6 py-4 text-gray-600 max-w-md">
+                                                    <div className="line-clamp-2 hover:line-clamp-none">{visit.notes || '-'}</div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'manager-doctors' && (
+                        <div className="space-y-4">
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <Icon name="search" size={20} className="text-gray-400" />
+                                </div>
+                                <input
+                                    type="text"
+                                    className="block w-full pl-12 pr-4 py-3.5 bg-white border border-gray-200 shadow-sm rounded-xl focus:ring-2 focus:ring-slate-800 text-base outline-none"
+                                    placeholder="Hekim, optik, kurum veya temsilci ara..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                <div className="block sm:hidden divide-y divide-gray-100">
+                                    {filteredDoctors.length === 0 ? (
+                                        <div className="p-8 text-center text-gray-500">Kayıt bulunamadı.</div>
+                                    ) : (
+                                        filteredDoctors.map(doctor => (
+                                            <div key={doctor.id} className="p-4 relative">
+                                                <div className="flex justify-between items-start mb-2 pr-10">
+                                                    <span className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2 py-1 rounded-lg flex items-center gap-1.5"><Icon name="user-circle" size={14}/> {doctor.addedByName}</span>
+                                                    {doctor.type === 'optik' ? (
+                                                        <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">OPTİK</span>
+                                                    ) : (
+                                                        <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">HEKİM</span>
+                                                    )}
+                                                </div>
+                                                <h3 className="font-bold text-gray-900 pr-8">{doctor.name}</h3>
+                                                <p className="text-sm text-gray-600 flex items-center gap-1.5 mt-1.5"><Icon name="building" size={14} className="text-gray-400"/> {doctor.hospital}</p>
+                                                <p className="text-sm text-gray-500 flex items-center gap-1.5 mt-1"><Icon name="map-pin" size={14} className="text-gray-400"/> {doctor.city}</p>
+                                                <button 
+                                                    onClick={() => handleDeleteDoctor(doctor.id)}
+                                                    className="absolute top-1/2 right-4 -translate-y-1/2 p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                                                >
+                                                    <Icon name="trash-2" size={22} />
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                <div className="hidden sm:block overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
+                                            <tr>
+                                                <th className="px-6 py-4">Ekleyen Temsilci</th>
+                                                <th className="px-6 py-4">Tür</th>
+                                                <th className="px-6 py-4">Kişi / Kurum Adı</th>
+                                                <th className="px-6 py-4">Kurum / Hastane</th>
+                                                <th className="px-6 py-4">Şehir</th>
+                                                <th className="px-6 py-4 text-right">İşlem</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {filteredDoctors.length === 0 ? (
+                                                <tr><td colSpan="6" className="px-6 py-12 text-center text-gray-500">Sistemde henüz kayıt bulunmuyor.</td></tr>
+                                            ) : (
+                                                filteredDoctors.map(doctor => (
+                                                    <tr key={doctor.id} className="hover:bg-slate-50/50 transition-colors">
+                                                        <td className="px-6 py-4"><span className="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg flex items-center gap-1.5 w-fit"><Icon name="user-circle" size={14}/> {doctor.addedByName}</span></td>
+                                                        <td className="px-6 py-4">
+                                                            {doctor.type === 'optik' ? (
+                                                                <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-1 rounded">OPTİK</span>
+                                                            ) : (
+                                                                <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">HEKİM</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-6 py-4 font-bold text-gray-800 text-[15px]">{doctor.name}</td>
+                                                        <td className="px-6 py-4 text-gray-600">{doctor.hospital}</td>
+                                                        <td className="px-6 py-4 text-gray-500">{doctor.city}</td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <button 
+                                                                onClick={() => handleDeleteDoctor(doctor.id)}
+                                                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                            >
+                                                                <Icon name="trash-2" size={20} />
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+
+            if (!activeProfile) {
+                return renderLoginScreen();
+            }
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    {renderToast()}
+                    <header className="bg-white sticky top-0 z-40 shadow-sm border-b border-gray-100">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+                            <div className="flex justify-between items-center h-16 sm:h-20">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-xl flex items-center justify-center shadow-md">
+                                        <Icon name="activity" className="text-white" size={24} />
+                                    </div>
+                                    <div>
+                                        <h1 className="font-black text-xl tracking-tight text-slate-800 leading-none mb-0.5">Merve Optik CRM</h1>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{activeProfile.role === 'manager' ? 'YÖNETİCİ PANELİ' : 'SAHA YÖNETİMİ'}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="hidden sm:flex items-center gap-4">
+                                    <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
+                                        <div className="text-right">
+                                            <p className="text-sm font-bold text-slate-800">{activeProfile.name}</p>
+                                            <p className="text-xs text-slate-500 capitalize">{activeProfile.role === 'manager' ? 'Yönetici' : 'Temsilci'}</p>
+                                        </div>
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${activeProfile.iconColor}`}>
+                                            {activeProfile.name.charAt(0)}
+                                        </div>
+                                        <button onClick={handleLogout} className="ml-2 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Çıkış Yap">
+                                            <Icon name="log-out" size={20} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <button className="sm:hidden p-2 text-slate-600 bg-slate-50 rounded-xl" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+                                    <Icon name="menu" size={24} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {isMobileMenuOpen && (
+                            <div className="sm:hidden absolute top-[65px] left-0 w-full bg-white border-b border-gray-100 shadow-xl p-4 z-50">
+                                <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl ${activeProfile.iconColor}`}>
+                                            {activeProfile.name.charAt(0)}
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-slate-800">{activeProfile.name}</p>
+                                            <p className="text-xs font-medium text-slate-500">{activeProfile.role === 'manager' ? 'Sistem Yöneticisi' : 'Saha Temsilcisi'}</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleLogout} className="w-10 h-10 bg-white border border-slate-200 text-red-500 rounded-xl flex items-center justify-center shadow-sm active:scale-95">
+                                        <Icon name="log-out" size={20} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </header>
+
+                    <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+                        {loading ? renderLoadingSpinner() : (
+                            activeProfile.role === 'rep' ? renderRepDashboard() : renderManagerDashboard()
+                        )}
+                    </main>
+
+                    {activeProfile.role === 'rep' && !loading && (
+                        <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-200 flex justify-around items-center h-[72px] pb-safe z-30 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] px-2">
+                            <button onClick={() => setActiveTab('doctors')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${activeTab === 'doctors' ? 'text-blue-600' : 'text-slate-400'}`}>
+                                <div className={`p-1.5 rounded-xl transition-all ${activeTab === 'doctors' ? 'bg-blue-50 scale-110' : ''}`}><Icon name="users" size={24} strokeWidth={activeTab === 'doctors' ? 2.5 : 2} /></div>
+                                <span className={`text-[10px] font-bold ${activeTab === 'doctors' ? 'text-blue-600' : 'text-slate-500'}`}>Kontaklar</span>
+                            </button>
+                            <div className="relative -top-6 px-2">
+                                <button onClick={() => setIsQuickVisitOpen(true)} className="w-16 h-16 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-[0_8px_16px_rgba(16,185,129,0.3)] active:scale-95 transition-transform border-[6px] border-slate-100">
+                                    <PlusIcon size={30} strokeWidth={3} />
+                                </button>
+                            </div>
+                            <button onClick={() => setActiveTab('my-visits')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${activeTab === 'my-visits' ? 'text-blue-600' : 'text-slate-400'}`}>
+                                <div className={`p-1.5 rounded-xl transition-all ${activeTab === 'my-visits' ? 'bg-blue-50 scale-110' : ''}`}><Icon name="clipboard-list" size={24} strokeWidth={activeTab === 'my-visits' ? 2.5 : 2} /></div>
+                                <span className={`text-[10px] font-bold ${activeTab === 'my-visits' ? 'text-blue-600' : 'text-slate-500'}`}>Ziyaretlerim</span>
+                            </button>
+                        </nav>
+                    )}
+
+                    {isAddDoctorOpen && renderAddDoctorModal()}
+                    {visitingDoctor && renderAddVisitModal()}
+                    {isQuickVisitOpen && renderQuickVisitModal()}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
