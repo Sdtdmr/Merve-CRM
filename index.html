@@ -84,12 +84,15 @@
             </svg>
         );
 
-        // --- Sabit Kullanıcı Listesi ---
+        // --- Sabit Kullanıcı Listesi (şifreler artık burada değil, Firestore'da tutuluyor) ---
         const USERS = [
-            { id: 'rep1', name: 'Sedat Demir', role: 'rep', iconColor: 'bg-blue-100 text-blue-700', password: 'sedat' },
-            { id: 'rep2', name: 'Engin Kaleli', role: 'rep', iconColor: 'bg-indigo-100 text-indigo-700', password: 'engin' },
-            { id: 'manager', name: 'Yönetici', role: 'manager', iconColor: 'bg-slate-800 text-white', password: '123' }
+            { id: 'rep1', name: 'Sedat Demir', role: 'rep', iconColor: 'bg-blue-100 text-blue-700' },
+            { id: 'rep2', name: 'Engin Kaleli', role: 'rep', iconColor: 'bg-indigo-100 text-indigo-700' },
+            { id: 'manager', name: 'Yönetici', role: 'manager', iconColor: 'bg-slate-800 text-white' }
         ];
+
+        // İlk kurulum için varsayılan şifreler. Firestore'da kayıt oluşana kadar bunlar geçerlidir.
+        const DEFAULT_PASSWORDS = { rep1: 'sedat', rep2: 'engin', manager: '123' };
 
         // --- DİKKAT: AŞAĞIDAKİ BİLGİLERİ KENDİ FİREBASE BİLGİLERİNİZLE DEĞİŞTİRİN ---
         const firebaseConfig = {
@@ -143,6 +146,7 @@
 
             const [doctors, setDoctors] = React.useState([]);
             const [visits, setVisits] = React.useState([]);
+            const [userPasswords, setUserPasswords] = React.useState({});
             const [loading, setLoading] = React.useState(true);
 
             // UI State
@@ -153,11 +157,17 @@
             const [quickSearchTerm, setQuickSearchTerm] = React.useState('');
             const [searchTerm, setSearchTerm] = React.useState('');
             const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+            const [isChangePasswordOpen, setIsChangePasswordOpen] = React.useState(false);
             
             // Login State
             const [loginStep, setLoginStep] = React.useState('select_profile');
             const [selectedProfileForLogin, setSelectedProfileForLogin] = React.useState(null);
             const [passwordInput, setPasswordInput] = React.useState('');
+
+            // Şifre değiştirme formu
+            const [currentPasswordInput, setCurrentPasswordInput] = React.useState('');
+            const [newPasswordInput, setNewPasswordInput] = React.useState('');
+            const [confirmPasswordInput, setConfirmPasswordInput] = React.useState('');
             
             const [toast, setToast] = React.useState({ show: false, message: '', type: 'success' });
 
@@ -181,6 +191,23 @@
 
                 return () => unsubscribe();
             }, []);
+
+            // Şifreleri, giriş ekranındayken bile okuyabilmek için firebaseUser hazır olur olmaz çekiyoruz.
+            React.useEffect(() => {
+                if (!firebaseUser) return;
+
+                const unsubCredentials = db.collection('userCredentials').onSnapshot((snapshot) => {
+                    const pw = {};
+                    snapshot.docs.forEach(d => {
+                        pw[d.id] = d.data().password;
+                    });
+                    setUserPasswords(pw);
+                }, (error) => {
+                    console.error("Error fetching credentials:", error);
+                });
+
+                return () => unsubCredentials();
+            }, [firebaseUser]);
 
             React.useEffect(() => {
                 if (!firebaseUser || !activeProfile) {
@@ -222,6 +249,11 @@
                 setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
             };
 
+            // Bir kullanıcının o anki geçerli şifresini döndürür: Firestore'da kayıtlıysa onu, yoksa varsayılanı kullanır.
+            const getPasswordFor = (profileId) => {
+                return userPasswords[profileId] !== undefined ? userPasswords[profileId] : DEFAULT_PASSWORDS[profileId];
+            };
+
             const handleProfileSelect = (profile) => {
                 setSelectedProfileForLogin(profile);
                 setLoginStep('password_prompt');
@@ -230,7 +262,8 @@
 
             const handlePasswordSubmit = (e) => {
                 e.preventDefault();
-                if (passwordInput === selectedProfileForLogin.password) {
+                const correctPassword = getPasswordFor(selectedProfileForLogin.id);
+                if (passwordInput === correctPassword) {
                     executeLogin(selectedProfileForLogin);
                 } else {
                     showToast('Hatalı şifre girdiniz!', 'error');
@@ -250,6 +283,39 @@
                 setActiveProfile(null);
                 localStorage.removeItem('crm_active_profile');
                 setIsMobileMenuOpen(false);
+            };
+
+            const handleChangePassword = async (e) => {
+                e.preventDefault();
+                const correctPassword = getPasswordFor(activeProfile.id);
+
+                if (currentPasswordInput !== correctPassword) {
+                    showToast('Mevcut şifreniz hatalı.', 'error');
+                    return;
+                }
+                if (!newPasswordInput || newPasswordInput.trim().length < 3) {
+                    showToast('Yeni şifre en az 3 karakter olmalı.', 'error');
+                    return;
+                }
+                if (newPasswordInput !== confirmPasswordInput) {
+                    showToast('Yeni şifreler birbiriyle eşleşmiyor!', 'error');
+                    return;
+                }
+
+                try {
+                    await db.collection('userCredentials').doc(activeProfile.id).set({
+                        password: newPasswordInput
+                    }, { merge: true });
+
+                    showToast('Şifreniz başarıyla güncellendi.');
+                    setIsChangePasswordOpen(false);
+                    setCurrentPasswordInput('');
+                    setNewPasswordInput('');
+                    setConfirmPasswordInput('');
+                } catch (error) {
+                    console.error("Error changing password:", error);
+                    showToast('Şifre değiştirilirken bir hata oluştu.', 'error');
+                }
             };
 
             const handleAddDoctor = async (e) => {
@@ -653,6 +719,49 @@
                                 </div>
                             )}
                         </div>
+                    </div>
+                </div>
+            );
+
+            const renderChangePasswordModal = () => (
+                <div className="fixed inset-0 bg-black/60 z-[80] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm transition-all">
+                    <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6">
+                        <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden"></div>
+                        <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
+                            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg mr-3"><Icon name="key" size={20} /></div>
+                            Şifre Değiştir
+                        </h2>
+                        <form onSubmit={handleChangePassword} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">MEVCUT ŞİFRE</label>
+                                <input required type="password" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" value={currentPasswordInput} onChange={e => setCurrentPasswordInput(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">YENİ ŞİFRE</label>
+                                <input required type="password" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" value={newPasswordInput} onChange={e => setNewPasswordInput(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">YENİ ŞİFRE (TEKRAR)</label>
+                                <input required type="password" className="w-full bg-gray-50 border-gray-200 rounded-xl p-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" value={confirmPasswordInput} onChange={e => setConfirmPasswordInput(e.target.value)} />
+                            </div>
+                            <div className="flex gap-3 pt-4 pb-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsChangePasswordOpen(false);
+                                        setCurrentPasswordInput('');
+                                        setNewPasswordInput('');
+                                        setConfirmPasswordInput('');
+                                    }}
+                                    className="flex-1 px-4 py-3.5 bg-gray-100 text-gray-700 rounded-xl font-bold active:scale-95 transition-all"
+                                >
+                                    İptal
+                                </button>
+                                <button type="submit" className="flex-[2] px-4 py-3.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all">
+                                    Şifreyi Güncelle
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             );
@@ -1077,7 +1186,10 @@
                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${activeProfile.iconColor}`}>
                                             {activeProfile.name.charAt(0)}
                                         </div>
-                                        <button onClick={handleLogout} className="ml-2 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Çıkış Yap">
+                                        <button onClick={() => setIsChangePasswordOpen(true)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Şifre Değiştir">
+                                            <Icon name="key" size={20} />
+                                        </button>
+                                        <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Çıkış Yap">
                                             <Icon name="log-out" size={20} />
                                         </button>
                                     </div>
@@ -1091,18 +1203,27 @@
 
                         {isMobileMenuOpen && (
                             <div className="sm:hidden absolute top-[65px] left-0 w-full bg-white border-b border-gray-100 shadow-xl p-4 z-50">
-                                <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl ${activeProfile.iconColor}`}>
-                                            {activeProfile.name.charAt(0)}
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-slate-800">{activeProfile.name}</p>
-                                            <p className="text-xs font-medium text-slate-500">{activeProfile.role === 'manager' ? 'Sistem Yöneticisi' : 'Saha Temsilcisi'}</p>
-                                        </div>
+                                <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl mb-3">
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl ${activeProfile.iconColor}`}>
+                                        {activeProfile.name.charAt(0)}
                                     </div>
-                                    <button onClick={handleLogout} className="w-10 h-10 bg-white border border-slate-200 text-red-500 rounded-xl flex items-center justify-center shadow-sm active:scale-95">
-                                        <Icon name="log-out" size={20} />
+                                    <div>
+                                        <p className="font-bold text-slate-800">{activeProfile.name}</p>
+                                        <p className="text-xs font-medium text-slate-500">{activeProfile.role === 'manager' ? 'Sistem Yöneticisi' : 'Saha Temsilcisi'}</p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => { setIsChangePasswordOpen(true); setIsMobileMenuOpen(false); }}
+                                        className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm active:scale-95 transition-all"
+                                    >
+                                        <Icon name="key" size={18} /> Şifre Değiştir
+                                    </button>
+                                    <button
+                                        onClick={handleLogout}
+                                        className="flex-1 flex items-center justify-center gap-2 py-3 bg-red-50 text-red-600 rounded-xl font-bold text-sm active:scale-95 transition-all"
+                                    >
+                                        <Icon name="log-out" size={18} /> Çıkış Yap
                                     </button>
                                 </div>
                             </div>
@@ -1136,6 +1257,7 @@
                     {isAddDoctorOpen && renderAddDoctorModal()}
                     {visitingDoctor && renderAddVisitModal()}
                     {isQuickVisitOpen && renderQuickVisitModal()}
+                    {isChangePasswordOpen && renderChangePasswordModal()}
                 </div>
             );
         }
