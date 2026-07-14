@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Merve Optik CRM</title>
     
+    <!-- HIZLANDIRMA: Sunuculara önceden bağlanarak indirme süresini kısaltır -->
+    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://www.gstatic.com">
+
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -29,10 +34,25 @@
         select { -webkit-appearance: none; -moz-appearance: none; appearance: none; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Açılış Ekranı Animasyonları */
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
     </style>
 </head>
 <body class="bg-slate-100 text-gray-900 selection:bg-blue-200">
-    <div id="root"></div>
+    
+    <div id="root">
+        <!-- HIZLANDIRMA: Anında Yüklenen Açılış Ekranı (Splash Screen) -->
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f8fafc; font-family: sans-serif;">
+            <div style="width: 80px; height: 80px; border-radius: 24px; background: linear-gradient(135deg, #2563eb, #1e40af); display: flex; align-items: center; justify-content: center; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3); animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            </div>
+            <h1 style="font-size: 24px; font-weight: 900; color: #1e293b; margin: 0; letter-spacing: -0.5px;">Merve Optik CRM</h1>
+            <p style="color: #64748b; font-weight: 500; margin-top: 8px; font-size: 14px;">Uygulama Yükleniyor...</p>
+            <div style="margin-top: 30px; width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        </div>
+    </div>
 
     <script type="text/babel">
         // Sizin Claude ile eklediğiniz güçlü İkon Düzeltmesi
@@ -383,7 +403,6 @@
                 const doctor = doctors.find(d => d.id === planVisit.doctorId);
                 if(!doctor) return;
 
-                // Mükerrer Kontrolü (Plan üzerinden gerçekleştirilirken)
                 const isDuplicate = visits.some(visit => visit.repId === activeProfile.id && visit.doctorId === doctor.id && visit.date === planVisit.plan.date);
                 if (isDuplicate) { 
                     showToast('Bu kontağa bu güne zaten ziyaret girilmiş!', 'error'); 
@@ -567,7 +586,6 @@
             const downloadPlansReport = () => {
                 if (plans.length === 0) return;
                 
-                // Planları Temsilci ve Tarihe Göre Grupla
                 const grouped = {};
                 plans.forEach(plan => {
                     if (!grouped[plan.repName]) grouped[plan.repName] = {};
@@ -583,7 +601,6 @@
                 const headers = ['Temsilci', 'Tarih', 'Planlanan Hastaneler', 'Planlanan Optikler'];
                 const csvData = [];
 
-                // Gruplanmış veriyi CSV satırlarına dönüştür
                 Object.keys(grouped).sort().forEach(rep => {
                     Object.keys(grouped[rep]).sort().forEach(date => {
                         const formattedDate = new Date(date).toLocaleDateString('tr-TR');
@@ -676,7 +693,6 @@
                 </div>
             );
 
-            // Modallar
             const renderChangePasswordModal = () => (
                 <div className="fixed inset-0 bg-black/60 z-[80] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm transition-all">
                     <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6">
@@ -820,7 +836,6 @@
                 </div>
             );
 
-            // YENİ: Ünite Düzenleme Modalı
             const renderEditUnitModal = () => (
                 <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm transition-all">
                     <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
@@ -884,7 +899,6 @@
                 );
             }
 
-            // YENİ: Doktor Düzenleme Modalı
             const renderEditDoctorModal = () => {
                 const relevantUnits = myUnits.filter(u => u.type === (editDoctorData.type === 'doktor' ? 'hastane' : 'optik'));
                 return (
@@ -1306,30 +1320,6 @@
                                         {filteredDoctors.map(d => (
                                             <tr key={d.id}>
                                                 <td className="px-6 py-4">{d.addedByName}</td><td className="px-6 py-4 font-medium">{d.type === 'optik' ? 'Optik' : 'Doktor'}</td><td className="px-6 py-4 font-bold">{d.name}</td><td className="px-6 py-4">{d.hospital}</td><td className="px-6 py-4">{d.city}</td>
-                                                <td className="px-6 py-4 text-right"><button onClick={()=>handleDeleteDoctor(d.id)} className="text-red-400 hover:text-red-600"><Icon name="trash-2" size={20}/></button></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'manager-doctors' && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                            <div className="relative border-b border-gray-100">
-                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><Icon name="search" size={20} className="text-gray-400" /></div>
-                                <input type="text" className="block w-full pl-12 pr-4 py-4 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-slate-800 text-base outline-none transition-all" placeholder="Doktor, optik, kurum veya temsilci ara..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                            </div>
-                            <div className="hidden sm:block overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
-                                        <tr><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Tür</th><th className="px-6 py-4">Kişi</th><th className="px-6 py-4">Ünite</th><th className="px-6 py-4">Şehir</th><th className="px-6 py-4 text-right">İşlem</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {filteredDoctors.map(d => (
-                                            <tr key={d.id}>
-                                                <td className="px-6 py-4">{d.addedByName}</td><td className="px-6 py-4">{d.type === 'optik' ? 'optik' : 'doktor'}</td><td className="px-6 py-4 font-bold">{d.name}</td><td className="px-6 py-4">{d.hospital}</td><td className="px-6 py-4">{d.city}</td>
                                                 <td className="px-6 py-4 text-right">
                                                     <div className="flex justify-end gap-2">
                                                         <button onClick={() => { setEditDoctorData(d); setIsEditDoctorOpen(true); }} className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Icon name="edit" size={20} /></button>
