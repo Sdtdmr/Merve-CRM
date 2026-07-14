@@ -86,6 +86,8 @@
         );
 
         // YENİ: Grafik (Chart) Bileşeni — sayısal değerleri de grafik üzerinde gösterir
+        // GÜNCELLEME: Sütun grafiklerde etiketler artık sütunun ORTASINDA (üstünde/altında değil),
+        // renkler daha kibar/yumuşak tonlara çevrildi, köşeler daha yuvarlak.
         if (window.Chart && window.ChartDataLabels) {
             window.Chart.register(window.ChartDataLabels);
         }
@@ -102,6 +104,7 @@
                 }
 
                 const isPieLike = type === 'pie' || type === 'doughnut';
+                const isBarLike = type === 'bar';
 
                 const ctx = chartRef.current.getContext('2d');
                 chartInstance.current = new window.Chart(ctx, {
@@ -110,20 +113,21 @@
                     options: { 
                         responsive: true, 
                         maintainAspectRatio: false,
-                        layout: { padding: { top: 12, bottom: 4 } },
+                        layout: { padding: { top: 8, bottom: 4 } },
                         plugins: {
                             legend: { position: 'bottom', labels: { usePointStyle: true, padding: 20, font: { weight: '600' } } },
                             datalabels: {
-                                color: isPieLike ? '#fff' : '#1e293b',
-                                anchor: isPieLike ? 'center' : 'end',
-                                align: isPieLike ? 'center' : 'top',
-                                offset: 4,
+                                color: isPieLike ? '#ffffff' : '#ffffff',
+                                anchor: isBarLike ? 'center' : 'center',
+                                align: 'center',
+                                offset: 0,
                                 font: { weight: '700', size: 12 },
                                 formatter: (value) => (value === 0 ? '' : value)
                             }
                         },
                         scales: type === 'bar' ? {
-                            y: { beginAtZero: true, ticks: { precision: 0 } }
+                            y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#f1f5f9' } },
+                            x: { grid: { display: false } }
                         } : undefined,
                         ...options 
                     }
@@ -465,6 +469,8 @@
                         doctorType: doctor.type || 'doktor',
                         doctorName: doctor.name,
                         doctorHospital: doctor.hospital,
+                        doctorCity: doctor.city,
+                        doctorUnitId: doctor.unitId || null,
                         repId: activeProfile.id,
                         repName: activeProfile.name,
                         date: planVisit.plan.date,
@@ -570,6 +576,8 @@
                         doctorType: visitingDoctor.type || 'doktor',
                         doctorName: visitingDoctor.name,
                         doctorHospital: visitingDoctor.hospital,
+                        doctorCity: visitingDoctor.city,
+                        doctorUnitId: visitingDoctor.unitId || null,
                         repId: activeProfile.id,
                         repName: activeProfile.name,
                         date: newVisit.date,
@@ -585,8 +593,26 @@
                 try { await db.collection('visits').doc(visitId).delete(); showToast('Ziyaret silindi.'); } catch (error) {}
             };
 
-            // ---- YENİDEN TASARLANDI: Genel Müdüre sunulabilecek, dönem seçimli (Aylık / 3 Aylık / Tüm Zamanlar),
-            //      grafik üzerinde sayısal değerleri de gösteren profesyonel performans raporu ----
+            // Bir ziyaretin şehrini bulmak için yardımcı fonksiyon.
+            // ÖNCELİK: ziyaretin bağlı olduğu kontağın GÜNCEL ünitesinin şehri (units koleksiyonundan canlı).
+            // Bu sayede kontak/ünite sonradan taşınsa/düzenlense bile rapor güncel şehri baz alır.
+            // Kontak veya ünite artık bulunamıyorsa (silinmiş olabilir), ziyaret kaydındaki şehir bilgisine düşer.
+            const getVisitCity = (visit, doctorsList, unitsList) => {
+                const doc = doctorsList.find(d => d.id === visit.doctorId);
+                if (doc) {
+                    const unit = unitsList.find(u => u.id === doc.unitId);
+                    if (unit && unit.city) return unit.city;
+                    if (doc.city) return doc.city;
+                }
+                if (visit.doctorCity) return visit.doctorCity;
+                return 'Bilinmeyen';
+            };
+
+            // ---- GÜNCELLENDİ: Ziyaret Kayıtları ve Planlanan Rutlar detay tabloları rapordan tamamen kaldırıldı.
+            //      Rapor artık sadece Yönetici Özeti + KPI'lar + grafikler + Temsilci Performans Özeti tablosunu içeriyor.
+            //      Şehir Dağılımı grafiği artık ünitenin GÜNCEL şehrine göre hesaplanıyor (kontağın olası eski/hatalı
+            //      şehir bilgisi yerine). PDF yazdırmada renk kaybı yaşanmaması için print-color-adjust eklendi.
+            //      Oluşturulma tarihinde saat kaldırıldı, sadece gün gösteriliyor. ----
             const downloadFullReport = (period) => {
                 setIsGeneratingReport(true);
 
@@ -608,10 +634,10 @@
                 const repPlanMap = {};
                 reportPlans.forEach(p => { repPlanMap[p.repName] = (repPlanMap[p.repName] || 0) + 1; });
 
+                // DÜZELTİLDİ: şehir dağılımı artık ünitenin güncel şehri baz alınarak hesaplanıyor.
                 const cityMap = {};
                 reportVisits.forEach(v => {
-                    const doc = doctors.find(d => d.id === v.doctorId);
-                    const city = doc ? doc.city : (v.doctorHospital || 'Bilinmeyen');
+                    const city = getVisitCity(v, doctors, units);
                     cityMap[city] = (cityMap[city] || 0) + 1;
                 });
 
@@ -622,10 +648,7 @@
                 const repNames = Array.from(new Set([...Object.keys(repVisitMap), ...Object.keys(repPlanMap)]));
                 const repSummary = repNames.map(name => {
                     const repVisitsList = reportVisits.filter(v => v.repName === name);
-                    const uniqueCities = new Set(repVisitsList.map(v => {
-                        const doc = doctors.find(d => d.id === v.doctorId);
-                        return doc ? doc.city : (v.doctorHospital || '');
-                    }));
+                    const uniqueCities = new Set(repVisitsList.map(v => getVisitCity(v, doctors, units)));
                     const uniqueUnits = new Set(repVisitsList.map(v => v.doctorHospital));
                     return {
                         name,
@@ -651,23 +674,6 @@
                     ? `${range.start.toLocaleDateString('tr-TR')} — ${range.end.toLocaleDateString('tr-TR')}`
                     : `Tüm kayıtlar (${reportVisits.length + reportPlans.length > 0 ? 'ilk kayıttan bugüne' : 'veri yok'})`;
 
-                const visitRows = reportVisits.map(v => `
-                    <tr>
-                        <td>${new Date(v.date).toLocaleDateString('tr-TR')}</td>
-                        <td><span class="tag tag-blue">${esc(v.repName)}</span></td>
-                        <td class="strong">${esc(v.doctorName)} ${v.doctorType === 'optik' ? '<span class="tag tag-indigo tag-sm">OPTİK</span>' : '<span class="tag tag-slate tag-sm">DOKTOR</span>'}</td>
-                        <td class="muted">${esc(v.doctorHospital)}</td>
-                        <td class="muted">${esc(v.notes) || '—'}</td>
-                    </tr>`).join('');
-
-                const planRows = reportPlans.map(p => `
-                    <tr>
-                        <td>${new Date(p.date).toLocaleDateString('tr-TR')}</td>
-                        <td><span class="tag tag-blue">${esc(p.repName)}</span></td>
-                        <td class="strong">${esc(p.unitName)} ${p.unitType === 'optik' ? '<span class="tag tag-indigo tag-sm">OPTİK</span>' : '<span class="tag tag-purple tag-sm">HASTANE</span>'}</td>
-                        <td class="muted">${esc(p.unitCity)}</td>
-                    </tr>`).join('');
-
                 const repSummaryRows = repSummary.map((r, i) => `
                     <tr>
                         <td class="strong">${i + 1}. ${esc(r.name)}</td>
@@ -676,6 +682,9 @@
                         <td class="center muted">${r.cityCount}</td>
                         <td class="center muted">${r.unitCount}</td>
                     </tr>`).join('');
+
+                // Oluşturulma tarihi: sadece gün (saat gösterilmiyor)
+                const generatedDateLabel = new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
 
                 const html = `<!DOCTYPE html>
 <html lang="tr">
@@ -687,16 +696,20 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"><\/script>
 <style>
   :root {
-    --navy: #0f172a; --blue: #2563eb; --slate: #64748b; --line: #e2e8f0; --bg: #f4f6fb;
+    --navy: #1e293b; --blue: #3b82f6; --slate: #64748b; --line: #e2e8f0; --bg: #f4f6fb;
   }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin:0; background: var(--bg); color: var(--navy); }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin:0; background: var(--bg); color: var(--navy);
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact;
+  }
   .sheet { max-width: 1080px; margin: 0 auto; padding: 36px 40px 60px; }
   .no-print { }
   .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom: 28px; }
-  .toolbar button { background: var(--blue); color:#fff; border:none; padding: 11px 22px; border-radius: 10px; font-weight:700; font-size: 14px; cursor:pointer; box-shadow: 0 8px 20px rgba(37,99,235,.25); }
-  .cover { background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%); border-radius: 20px; color:#fff; padding: 40px; margin-bottom: 28px; position:relative; overflow:hidden; }
-  .cover .eyebrow { font-size:12px; letter-spacing:2px; font-weight:700; text-transform:uppercase; color:#93c5fd; margin-bottom:10px; }
+  .toolbar button { background: var(--blue); color:#fff; border:none; padding: 11px 22px; border-radius: 10px; font-weight:700; font-size: 14px; cursor:pointer; box-shadow: 0 8px 20px rgba(59,130,246,.25); }
+  .cover { background: linear-gradient(135deg, #1e293b 0%, #2c4a8f 100%); border-radius: 20px; color:#fff; padding: 40px; margin-bottom: 28px; position:relative; overflow:hidden; }
+  .cover .eyebrow { font-size:12px; letter-spacing:2px; font-weight:700; text-transform:uppercase; color:#a8c5f0; margin-bottom:10px; }
   .cover h1 { font-size: 30px; margin: 0 0 8px; font-weight:900; letter-spacing:-0.5px; }
   .cover p.sub { color:#cbd5e1; margin:0; font-size:14px; }
   .cover .meta { display:flex; gap:28px; margin-top:26px; flex-wrap:wrap; }
@@ -722,7 +735,7 @@
   h2.section-title { font-size:16px; font-weight:900; color:var(--navy); margin: 30px 0 12px; padding-bottom:8px; border-bottom: 2px solid var(--navy); }
   table { width:100%; border-collapse:collapse; background:#fff; border-radius:14px; overflow:hidden; }
   .table-card { border:1px solid var(--line); border-radius:14px; overflow:hidden; margin-bottom:24px; }
-  thead th { background:#0f172a; color:#fff; text-align:left; padding:12px 16px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; font-weight:800; }
+  thead th { background:#1e293b; color:#fff; text-align:left; padding:12px 16px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; font-weight:800; }
   tbody td { padding:11px 16px; font-size:13px; border-bottom:1px solid #f1f5f9; color:#334155; }
   tbody tr:last-child td { border-bottom:none; }
   tbody tr:nth-child(even) { background:#fafbfe; }
@@ -740,13 +753,14 @@
   footer strong { color:#475569; }
 
   @media print {
-    body { background:#fff; }
+    body { background:#fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
     .no-print { display:none !important; }
     .sheet { padding: 0; max-width: none; }
-    .cover, .exec, .kpi, .card, .table-card { box-shadow:none; break-inside: avoid; }
+    .cover, .exec, .kpi, .card, .table-card { box-shadow:none; break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
     .grid2 { break-inside: avoid; }
     table { font-size: 11px; }
     h2.section-title { break-after: avoid; }
+    canvas { max-width: 100% !important; }
   }
   @media (max-width: 800px) {
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
@@ -757,7 +771,7 @@
 <body>
   <div class="sheet">
     <div class="toolbar no-print">
-      <div style="font-size:13px;color:#64748b;font-weight:600;">Bu rapor yazdırma önizlemesinde en iyi görünümü sağlar.</div>
+      <div style="font-size:13px;color:#64748b;font-weight:600;">Bu rapor yazdırma önizlemesinde en iyi görünümü sağlar. Yazdırma ayarlarında "Arka Plan Grafikleri" (Background Graphics) seçeneğini açık tutun.</div>
       <button onclick="window.print()">PDF Olarak Yazdır / Kaydet</button>
     </div>
 
@@ -766,7 +780,7 @@
       <h1>${esc(periodMeta.shortLabel)}</h1>
       <p class="sub">Rapor kapsamı: ${esc(rangeLabel)}</p>
       <div class="meta">
-        <div>Oluşturulma Tarihi<strong>${new Date().toLocaleString('tr-TR')}</strong></div>
+        <div>Oluşturulma Tarihi<strong>${generatedDateLabel}</strong></div>
         <div>Dönem<strong>${esc(periodMeta.label)}</strong></div>
         <div>Aktif Temsilci<strong>${activeRepCount}</strong></div>
       </div>
@@ -818,22 +832,6 @@
         </table>
     </div>
 
-    <h2 class="section-title">Ziyaret Kayıtları</h2>
-    <div class="table-card">
-        <table>
-            <thead><tr><th>Tarih</th><th>Temsilci</th><th>Kişi</th><th>Kurum</th><th>Not</th></tr></thead>
-            <tbody>${visitRows || '<tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8;">Kayıt yok</td></tr>'}</tbody>
-        </table>
-    </div>
-
-    <h2 class="section-title">Planlanan Rutlar</h2>
-    <div class="table-card">
-        <table>
-            <thead><tr><th>Tarih</th><th>Temsilci</th><th>Ünite</th><th>Şehir</th></tr></thead>
-            <tbody>${planRows || '<tr><td colspan="4" style="text-align:center;padding:24px;color:#94a3b8;">Kayıt yok</td></tr>'}</tbody>
-        </table>
-    </div>
-
     <footer>
         <strong>Merve Optik CRM</strong> — Saha Yönetim Sistemi tarafından otomatik olarak oluşturulmuştur.<br>
         Bu rapor iç kullanım amaçlıdır ve gizlilik içerebilir.
@@ -842,34 +840,46 @@
 
   <script>
     if (window.Chart && window.ChartDataLabels) { Chart.register(ChartDataLabels); }
+    // Kibar/yumuşak renk paleti — eski keskin tonlar yerine daha pastel, profesyonel renkler kullanılıyor.
+    const palette = {
+        blue: '#5B8DEF',
+        indigo: '#8B7FE8',
+        emerald: '#4FBF9F',
+        amber: '#E8A94F',
+        rose: '#E8798F',
+        teal: '#4FB8C4',
+        violet: '#A78BDB',
+        slate: '#94A3B8'
+    };
     const baseOpts = {
         responsive: true, maintainAspectRatio: false,
         plugins: {
             legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16, font: { size: 11, weight: '600' } } },
-            datalabels: { font: { weight: '700', size: 12 }, formatter: (v) => (v === 0 ? '' : v) }
+            // Etiketler artık sütun/dilimin ORTASINDA (anchor+align: center), üstünde/altında değil.
+            datalabels: { color: '#ffffff', anchor: 'center', align: 'center', offset: 0, font: { weight: '700', size: 12 }, formatter: (v) => (v === 0 ? '' : v) }
         }
     };
     ${reportVisits.length > 0 ? `
     new Chart(document.getElementById('repVisitChart'), {
         type: 'bar',
-        data: { labels: ${JSON.stringify(Object.keys(repVisitMap))}, datasets: [{ label: 'Ziyaret', data: ${JSON.stringify(Object.values(repVisitMap))}, backgroundColor: '#2563eb', borderRadius: 6 }] },
-        options: { ...baseOpts, scales: { y: { beginAtZero:true, ticks:{ precision:0 } } }, plugins: { ...baseOpts.plugins, legend:{display:false}, datalabels: { ...baseOpts.plugins.datalabels, color:'#1e293b', anchor:'end', align:'top' } } }
+        data: { labels: ${JSON.stringify(Object.keys(repVisitMap))}, datasets: [{ label: 'Ziyaret', data: ${JSON.stringify(Object.values(repVisitMap))}, backgroundColor: palette.blue, borderRadius: 10, borderSkipped: false, maxBarThickness: 56 }] },
+        options: { ...baseOpts, scales: { y: { beginAtZero:true, ticks:{ precision:0 }, grid: { color: '#f1f5f9' } }, x: { grid: { display:false } } }, plugins: { ...baseOpts.plugins, legend:{display:false}, datalabels: { ...baseOpts.plugins.datalabels, anchor:'center', align:'center' } } }
     });
     new Chart(document.getElementById('cityChart'), {
         type: 'doughnut',
-        data: { labels: ${JSON.stringify(Object.keys(cityMap))}, datasets: [{ data: ${JSON.stringify(Object.values(cityMap))}, backgroundColor: ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ef4444','#ec4899','#14b8a6'] }] },
+        data: { labels: ${JSON.stringify(Object.keys(cityMap))}, datasets: [{ data: ${JSON.stringify(Object.values(cityMap))}, backgroundColor: [palette.violet, palette.blue, palette.emerald, palette.amber, palette.rose, palette.teal, palette.slate], borderWidth: 2, borderColor: '#fff' }] },
         options: { ...baseOpts, plugins: { ...baseOpts.plugins, datalabels: { ...baseOpts.plugins.datalabels, color:'#fff' } } }
     });
     new Chart(document.getElementById('typeChart'), {
         type: 'pie',
-        data: { labels: ${JSON.stringify(Object.keys(typeMap))}, datasets: [{ data: ${JSON.stringify(Object.values(typeMap))}, backgroundColor: ['#6366f1','#3b82f6'] }] },
+        data: { labels: ${JSON.stringify(Object.keys(typeMap))}, datasets: [{ data: ${JSON.stringify(Object.values(typeMap))}, backgroundColor: [palette.indigo, palette.blue], borderWidth: 2, borderColor: '#fff' }] },
         options: { ...baseOpts, plugins: { ...baseOpts.plugins, datalabels: { ...baseOpts.plugins.datalabels, color:'#fff' } } }
     });` : ''}
     ${reportPlans.length > 0 ? `
     new Chart(document.getElementById('planChart'), {
         type: 'bar',
-        data: { labels: ${JSON.stringify(Object.keys(repPlanMap))}, datasets: [{ label: 'Plan', data: ${JSON.stringify(Object.values(repPlanMap))}, backgroundColor: '#f97316', borderRadius: 6 }] },
-        options: { ...baseOpts, indexAxis: 'y', scales: { x: { beginAtZero:true, ticks:{ precision:0 } } }, plugins: { ...baseOpts.plugins, legend:{display:false}, datalabels: { ...baseOpts.plugins.datalabels, color:'#1e293b', anchor:'end', align:'right' } } }
+        data: { labels: ${JSON.stringify(Object.keys(repPlanMap))}, datasets: [{ label: 'Plan', data: ${JSON.stringify(Object.values(repPlanMap))}, backgroundColor: palette.amber, borderRadius: 10, borderSkipped: false, maxBarThickness: 32 }] },
+        options: { ...baseOpts, indexAxis: 'y', scales: { x: { beginAtZero:true, ticks:{ precision:0 }, grid: { color: '#f1f5f9' } }, y: { grid: { display:false } } }, plugins: { ...baseOpts.plugins, legend:{display:false}, datalabels: { ...baseOpts.plugins.datalabels, anchor:'center', align:'center' } } }
     });` : ''}
   <\/script>
 </body>
@@ -1416,37 +1426,40 @@
             );
 
             const renderManagerDashboard = () => {
-                // GRAFİK VERİLERİ (İSTATİSTİKLER İÇİN)
+                // GRAFİK VERİLERİ (İSTATİSTİKLER İÇİN) — kibar/pastel renk paleti kullanılıyor.
+                const softPalette = ['#5B8DEF', '#4FBF9F', '#E8A94F', '#E8798F', '#A78BDB', '#4FB8C4', '#94A3B8'];
+
                 const repVisitsMap = {};
                 visits.forEach(v => { repVisitsMap[v.repName] = (repVisitsMap[v.repName] || 0) + 1; });
                 const chartRepVisits = {
                     labels: Object.keys(repVisitsMap),
-                    datasets: [{ label: 'Ziyaret Sayısı', data: Object.values(repVisitsMap), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'], borderRadius: 6 }]
+                    datasets: [{ label: 'Ziyaret Sayısı', data: Object.values(repVisitsMap), backgroundColor: softPalette, borderRadius: 10, borderSkipped: false, maxBarThickness: 56 }]
                 };
 
                 const repPlansMap = {};
                 plans.forEach(p => { repPlansMap[p.repName] = (repPlansMap[p.repName] || 0) + 1; });
                 const chartRepPlans = {
                     labels: Object.keys(repPlansMap),
-                    datasets: [{ label: 'Planlanan Rut Sayısı', data: Object.values(repPlansMap), backgroundColor: ['#f97316', '#6366f1', '#eab308', '#a855f7'], borderRadius: 6 }]
+                    datasets: [{ label: 'Planlanan Rut Sayısı', data: Object.values(repPlansMap), backgroundColor: ['#E8A94F', '#8B7FE8', '#E8D24F', '#A78BDB'], borderRadius: 10, borderSkipped: false, maxBarThickness: 56 }]
                 };
 
+                // DÜZELTİLDİ: Şehir dağılımı artık kontağın kendi (olası eski/hatalı) şehir alanı yerine,
+                // kontağın bağlı olduğu ÜNİTENİN GÜNCEL şehri baz alınarak hesaplanıyor.
                 const cityMap = {};
                 visits.forEach(v => {
-                    const docInfo = doctors.find(d => d.id === v.doctorId);
-                    const city = docInfo ? docInfo.city : 'Bilinmeyen';
+                    const city = getVisitCity(v, doctors, units);
                     cityMap[city] = (cityMap[city] || 0) + 1;
                 });
                 const chartCityDist = {
                     labels: Object.keys(cityMap),
-                    datasets: [{ data: Object.values(cityMap), backgroundColor: ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'], borderWidth: 0 }]
+                    datasets: [{ data: Object.values(cityMap), backgroundColor: ['#A78BDB', '#5B8DEF', '#4FBF9F', '#E8A94F', '#E8798F', '#4FB8C4', '#94A3B8'], borderWidth: 2, borderColor: '#ffffff' }]
                 };
 
                 const typeMap = { 'Optik': 0, 'Doktor': 0 };
                 visits.forEach(v => { typeMap[v.doctorType === 'optik' ? 'Optik' : 'Doktor']++; });
                 const chartTypeDist = {
                     labels: Object.keys(typeMap),
-                    datasets: [{ data: Object.values(typeMap), backgroundColor: ['#6366f1', '#3b82f6'], borderWidth: 0 }]
+                    datasets: [{ data: Object.values(typeMap), backgroundColor: ['#8B7FE8', '#5B8DEF'], borderWidth: 2, borderColor: '#ffffff' }]
                 };
 
                 return (
