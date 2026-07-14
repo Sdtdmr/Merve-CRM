@@ -575,8 +575,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Merve Optik CRM - Rapor</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.tailwindcss.com"><\/script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   @media print { .no-print { display: none; } table { font-size: 11px; } }
@@ -665,7 +665,7 @@
         data: { labels: ${JSON.stringify(Object.keys(repPlanMap))}, datasets: [{ data: ${JSON.stringify(Object.values(repPlanMap))}, backgroundColor: '#f97316', borderRadius: 6 }] },
         options: { indexAxis: 'y', plugins: { legend: { display: false } } }
     });` : ''}
-  </script>
+  <\/script>
 </body>
 </html>`;
 
@@ -677,7 +677,7 @@
                 document.body.appendChild(link);
                 link.click(); document.body.removeChild(link);
             };
-
+            
             // Filtreler
             const myUnits = units.filter(unit => activeProfile?.role === 'manager' || unit.addedByProfileId === activeProfile?.id);
             const filteredUnits = myUnits.filter(u => u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.city.toLowerCase().includes(searchTerm.toLowerCase()));
