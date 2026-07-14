@@ -25,6 +25,8 @@
 
     <!-- YENİ: Chart.js (Grafikler için) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- YENİ: Chart.js Datalabels eklentisi (grafiklerde sayısal değer gösterimi için) -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -83,7 +85,11 @@
             </svg>
         );
 
-        // YENİ: Grafik (Chart) Bileşeni
+        // YENİ: Grafik (Chart) Bileşeni — sayısal değerleri de grafik üzerinde gösterir
+        if (window.Chart && window.ChartDataLabels) {
+            window.Chart.register(window.ChartDataLabels);
+        }
+
         const SimpleChart = ({ type, data, options }) => {
             const chartRef = React.useRef(null);
             const chartInstance = React.useRef(null);
@@ -95,6 +101,8 @@
                     chartInstance.current.destroy();
                 }
 
+                const isPieLike = type === 'pie' || type === 'doughnut';
+
                 const ctx = chartRef.current.getContext('2d');
                 chartInstance.current = new window.Chart(ctx, {
                     type: type,
@@ -102,9 +110,21 @@
                     options: { 
                         responsive: true, 
                         maintainAspectRatio: false,
+                        layout: { padding: { top: 12, bottom: 4 } },
                         plugins: {
-                            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 20 } }
+                            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 20, font: { weight: '600' } } },
+                            datalabels: {
+                                color: isPieLike ? '#fff' : '#1e293b',
+                                anchor: isPieLike ? 'center' : 'end',
+                                align: isPieLike ? 'center' : 'top',
+                                offset: 4,
+                                font: { weight: '700', size: 12 },
+                                formatter: (value) => (value === 0 ? '' : value)
+                            }
                         },
+                        scales: type === 'bar' ? {
+                            y: { beginAtZero: true, ticks: { precision: 0 } }
+                        } : undefined,
                         ...options 
                     }
                 });
@@ -176,6 +196,33 @@
             return dates;
         };
 
+        // YENİ: Rapor dönemi seçenekleri ve tarih filtresi yardımcı fonksiyonu
+        const REPORT_PERIODS = {
+            month: { label: 'Bu Ay', shortLabel: 'Aylık Rapor' },
+            quarter: { label: 'Son 3 Ay', shortLabel: '3 Aylık Rapor' },
+            all: { label: 'Tüm Zamanlar', shortLabel: 'Genel Rapor' }
+        };
+
+        const getPeriodRange = (period) => {
+            const now = new Date();
+            const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+            let start;
+            if (period === 'month') {
+                start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+            } else if (period === 'quarter') {
+                start = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0);
+            } else {
+                start = null;
+            }
+            return { start, end };
+        };
+
+        const isDateInRange = (dateStr, range) => {
+            if (!range.start) return true;
+            const d = new Date(dateStr + 'T12:00:00');
+            return d >= range.start && d <= range.end;
+        };
+
         function App() {
             if (isDummyConfig) {
                 return (
@@ -205,8 +252,12 @@
             const [userPasswords, setUserPasswords] = React.useState({});
             const [loading, setLoading] = React.useState(true);
 
-            // Arayüz State'leri
-            const [activeTab, setActiveTab] = React.useState('plans');
+            // Arayüz State'leri — YENİ: yönetici girişinde varsayılan olarak "İstatistikler" sekmesi (manager-stats) açılır.
+            const [activeTab, setActiveTab] = React.useState(() => {
+                const saved = localStorage.getItem('crm_active_profile');
+                const savedProfile = saved ? JSON.parse(saved) : null;
+                return savedProfile?.role === 'manager' ? 'manager-stats' : 'plans';
+            });
             const [isAddUnitOpen, setIsAddUnitOpen] = React.useState(false); 
             const [isAddDoctorOpen, setIsAddDoctorOpen] = React.useState(false);
             const [visitingDoctor, setVisitingDoctor] = React.useState(null); 
@@ -243,6 +294,10 @@
             const [isAddPlanOpen, setIsAddPlanOpen] = React.useState(false);
             const [newPlan, setNewPlan] = React.useState({ unitId: '' });
             const [planVisit, setPlanVisit] = React.useState({ plan: null, doctorId: '', notes: '' });
+
+            // YENİ: İndirilecek rapor için seçilen dönem (aylık / 3 aylık / tüm zamanlar)
+            const [reportPeriod, setReportPeriod] = React.useState('month');
+            const [isGeneratingReport, setIsGeneratingReport] = React.useState(false);
 
             React.useEffect(() => {
                 auth.signInAnonymously().catch(error => console.error("Auth Error:", error));
@@ -530,43 +585,96 @@
                 try { await db.collection('visits').doc(visitId).delete(); showToast('Ziyaret silindi.'); } catch (error) {}
             };
 
-            // ---- YENİ: Şık, grafikli, tek dosyalık HTML Raporu (Excel raporlarının yerine) ----
-            const downloadFullReport = () => {
-                if (visits.length === 0 && plans.length === 0) return;
+            // ---- YENİDEN TASARLANDI: Genel Müdüre sunulabilecek, dönem seçimli (Aylık / 3 Aylık / Tüm Zamanlar),
+            //      grafik üzerinde sayısal değerleri de gösteren profesyonel performans raporu ----
+            const downloadFullReport = (period) => {
+                setIsGeneratingReport(true);
+
+                const range = getPeriodRange(period);
+                const periodMeta = REPORT_PERIODS[period];
+
+                const reportVisits = visits.filter(v => isDateInRange(v.date, range));
+                const reportPlans = plans.filter(p => isDateInRange(p.date, range));
+
+                if (reportVisits.length === 0 && reportPlans.length === 0) {
+                    showToast('Seçilen dönemde raporlanacak veri bulunmuyor.', 'error');
+                    setIsGeneratingReport(false);
+                    return;
+                }
 
                 const repVisitMap = {};
-                visits.forEach(v => { repVisitMap[v.repName] = (repVisitMap[v.repName] || 0) + 1; });
+                reportVisits.forEach(v => { repVisitMap[v.repName] = (repVisitMap[v.repName] || 0) + 1; });
 
                 const repPlanMap = {};
-                plans.forEach(p => { repPlanMap[p.repName] = (repPlanMap[p.repName] || 0) + 1; });
+                reportPlans.forEach(p => { repPlanMap[p.repName] = (repPlanMap[p.repName] || 0) + 1; });
 
                 const cityMap = {};
-                visits.forEach(v => {
+                reportVisits.forEach(v => {
                     const doc = doctors.find(d => d.id === v.doctorId);
                     const city = doc ? doc.city : (v.doctorHospital || 'Bilinmeyen');
                     cityMap[city] = (cityMap[city] || 0) + 1;
                 });
 
                 const typeMap = { Doktor: 0, Optik: 0 };
-                visits.forEach(v => { typeMap[v.doctorType === 'optik' ? 'Optik' : 'Doktor']++; });
+                reportVisits.forEach(v => { typeMap[v.doctorType === 'optik' ? 'Optik' : 'Doktor']++; });
+
+                // Temsilci bazlı detaylı özet tablosu (genel müdür için en faydalı kısım)
+                const repNames = Array.from(new Set([...Object.keys(repVisitMap), ...Object.keys(repPlanMap)]));
+                const repSummary = repNames.map(name => {
+                    const repVisitsList = reportVisits.filter(v => v.repName === name);
+                    const uniqueCities = new Set(repVisitsList.map(v => {
+                        const doc = doctors.find(d => d.id === v.doctorId);
+                        return doc ? doc.city : (v.doctorHospital || '');
+                    }));
+                    const uniqueUnits = new Set(repVisitsList.map(v => v.doctorHospital));
+                    return {
+                        name,
+                        visitCount: repVisitMap[name] || 0,
+                        planCount: repPlanMap[name] || 0,
+                        cityCount: uniqueCities.size,
+                        unitCount: uniqueUnits.size
+                    };
+                }).sort((a, b) => b.visitCount - a.visitCount);
+
+                const totalVisits = reportVisits.length;
+                const totalPlans = reportPlans.length;
+                const activeRepCount = repNames.length;
+                const avgVisitsPerRep = activeRepCount > 0 ? (totalVisits / activeRepCount).toFixed(1) : '0.0';
+                const topCity = Object.entries(cityMap).sort((a, b) => b[1] - a[1])[0];
+                const topRep = repSummary[0];
+                const doctorPct = totalVisits > 0 ? Math.round((typeMap.Doktor / totalVisits) * 100) : 0;
+                const opticPct = totalVisits > 0 ? Math.round((typeMap.Optik / totalVisits) * 100) : 0;
 
                 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-                const visitRows = visits.map(v => `
-                    <tr class="border-b border-slate-100">
-                        <td class="px-4 py-3 font-medium whitespace-nowrap">${new Date(v.date).toLocaleDateString('tr-TR')}</td>
-                        <td class="px-4 py-3"><span class="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2 py-1 rounded-lg text-xs whitespace-nowrap">${esc(v.repName)}</span></td>
-                        <td class="px-4 py-3 font-bold">${esc(v.doctorName)} ${v.doctorType === 'optik' ? '<span class="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1">OPTİK</span>' : ''}</td>
-                        <td class="px-4 py-3 text-slate-500">${esc(v.doctorHospital)}</td>
-                        <td class="px-4 py-3 text-slate-500">${esc(v.notes) || '-'}</td>
+                const rangeLabel = range.start
+                    ? `${range.start.toLocaleDateString('tr-TR')} — ${range.end.toLocaleDateString('tr-TR')}`
+                    : `Tüm kayıtlar (${reportVisits.length + reportPlans.length > 0 ? 'ilk kayıttan bugüne' : 'veri yok'})`;
+
+                const visitRows = reportVisits.map(v => `
+                    <tr>
+                        <td>${new Date(v.date).toLocaleDateString('tr-TR')}</td>
+                        <td><span class="tag tag-blue">${esc(v.repName)}</span></td>
+                        <td class="strong">${esc(v.doctorName)} ${v.doctorType === 'optik' ? '<span class="tag tag-indigo tag-sm">OPTİK</span>' : '<span class="tag tag-slate tag-sm">DOKTOR</span>'}</td>
+                        <td class="muted">${esc(v.doctorHospital)}</td>
+                        <td class="muted">${esc(v.notes) || '—'}</td>
                     </tr>`).join('');
 
-                const planRows = plans.map(p => `
-                    <tr class="border-b border-slate-100">
-                        <td class="px-4 py-3 font-medium whitespace-nowrap">${new Date(p.date).toLocaleDateString('tr-TR')}</td>
-                        <td class="px-4 py-3"><span class="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2 py-1 rounded-lg text-xs whitespace-nowrap">${esc(p.repName)}</span></td>
-                        <td class="px-4 py-3 font-bold">${esc(p.unitName)} ${p.unitType === 'optik' ? '<span class="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1">OPTİK</span>' : '<span class="text-[10px] font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded ml-1">HASTANE</span>'}</td>
-                        <td class="px-4 py-3 text-slate-500">${esc(p.unitCity)}</td>
+                const planRows = reportPlans.map(p => `
+                    <tr>
+                        <td>${new Date(p.date).toLocaleDateString('tr-TR')}</td>
+                        <td><span class="tag tag-blue">${esc(p.repName)}</span></td>
+                        <td class="strong">${esc(p.unitName)} ${p.unitType === 'optik' ? '<span class="tag tag-indigo tag-sm">OPTİK</span>' : '<span class="tag tag-purple tag-sm">HASTANE</span>'}</td>
+                        <td class="muted">${esc(p.unitCity)}</td>
+                    </tr>`).join('');
+
+                const repSummaryRows = repSummary.map((r, i) => `
+                    <tr>
+                        <td class="strong">${i + 1}. ${esc(r.name)}</td>
+                        <td class="center strong">${r.visitCount}</td>
+                        <td class="center">${r.planCount}</td>
+                        <td class="center muted">${r.cityCount}</td>
+                        <td class="center muted">${r.unitCount}</td>
                     </tr>`).join('');
 
                 const html = `<!DOCTYPE html>
@@ -574,96 +682,194 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Merve Optik CRM - Rapor</title>
-<script src="https://cdn.tailwindcss.com"><\/script>
+<title>Merve Optik CRM — ${esc(periodMeta.shortLabel)}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"><\/script>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  @media print { .no-print { display: none; } table { font-size: 11px; } }
+  :root {
+    --navy: #0f172a; --blue: #2563eb; --slate: #64748b; --line: #e2e8f0; --bg: #f4f6fb;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin:0; background: var(--bg); color: var(--navy); }
+  .sheet { max-width: 1080px; margin: 0 auto; padding: 36px 40px 60px; }
+  .no-print { }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom: 28px; }
+  .toolbar button { background: var(--blue); color:#fff; border:none; padding: 11px 22px; border-radius: 10px; font-weight:700; font-size: 14px; cursor:pointer; box-shadow: 0 8px 20px rgba(37,99,235,.25); }
+  .cover { background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%); border-radius: 20px; color:#fff; padding: 40px; margin-bottom: 28px; position:relative; overflow:hidden; }
+  .cover .eyebrow { font-size:12px; letter-spacing:2px; font-weight:700; text-transform:uppercase; color:#93c5fd; margin-bottom:10px; }
+  .cover h1 { font-size: 30px; margin: 0 0 8px; font-weight:900; letter-spacing:-0.5px; }
+  .cover p.sub { color:#cbd5e1; margin:0; font-size:14px; }
+  .cover .meta { display:flex; gap:28px; margin-top:26px; flex-wrap:wrap; }
+  .cover .meta div { font-size:12px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+  .cover .meta strong { display:block; color:#fff; font-size:16px; margin-top:4px; letter-spacing:0; text-transform:none; font-weight:800; }
+
+  .exec { background:#fff; border-radius:16px; padding:24px 28px; margin-bottom: 24px; border:1px solid var(--line); }
+  .exec h2 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color:var(--slate); margin:0 0 10px; font-weight:800; }
+  .exec p { font-size:15px; line-height:1.7; margin:0; color:#1e293b; }
+  .exec p b { color: var(--blue); }
+
+  .kpi-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:14px; margin-bottom: 24px; }
+  .kpi { background:#fff; border-radius:14px; padding:18px; border:1px solid var(--line); }
+  .kpi .label { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--slate); margin-bottom:8px; }
+  .kpi .value { font-size:26px; font-weight:900; color:var(--navy); }
+
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .card { background:#fff; border-radius:16px; padding:22px; border:1px solid var(--line); }
+  .card h3 { font-size:13px; text-transform:uppercase; letter-spacing:.6px; color:var(--slate); margin:0 0 16px; font-weight:800; display:flex; align-items:center; gap:8px; }
+  .chart-wrap { height: 260px; position:relative; }
+  .empty { text-align:center; color:#94a3b8; padding: 50px 0; font-size:14px; }
+
+  h2.section-title { font-size:16px; font-weight:900; color:var(--navy); margin: 30px 0 12px; padding-bottom:8px; border-bottom: 2px solid var(--navy); }
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:14px; overflow:hidden; }
+  .table-card { border:1px solid var(--line); border-radius:14px; overflow:hidden; margin-bottom:24px; }
+  thead th { background:#0f172a; color:#fff; text-align:left; padding:12px 16px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; font-weight:800; }
+  tbody td { padding:11px 16px; font-size:13px; border-bottom:1px solid #f1f5f9; color:#334155; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:nth-child(even) { background:#fafbfe; }
+  td.strong { font-weight:700; color:#1e293b; }
+  td.muted { color:#94a3b8; }
+  td.center { text-align:center; }
+  .tag { display:inline-block; font-weight:700; font-size:12px; padding:3px 9px; border-radius:8px; }
+  .tag-sm { font-size:9px; padding:2px 6px; margin-left:6px; }
+  .tag-blue { background:#dbeafe; color:#1d4ed8; border:1px solid #bfdbfe; }
+  .tag-indigo { background:#e0e7ff; color:#4338ca; }
+  .tag-purple { background:#f3e8ff; color:#7e22ce; }
+  .tag-slate { background:#f1f5f9; color:#475569; }
+
+  footer { text-align:center; color:#94a3b8; font-size:11px; margin-top:36px; line-height:1.8; }
+  footer strong { color:#475569; }
+
+  @media print {
+    body { background:#fff; }
+    .no-print { display:none !important; }
+    .sheet { padding: 0; max-width: none; }
+    .cover, .exec, .kpi, .card, .table-card { box-shadow:none; break-inside: avoid; }
+    .grid2 { break-inside: avoid; }
+    table { font-size: 11px; }
+    h2.section-title { break-after: avoid; }
+  }
+  @media (max-width: 800px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .grid2 { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
-<body class="bg-slate-100 text-slate-800">
-  <div class="max-w-6xl mx-auto p-4 sm:p-10">
-    <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-8 no-print">
-      <div>
-        <h1 class="text-2xl font-black text-slate-800">Genel Performans Raporu</h1>
-        <p class="text-slate-500 font-medium">Merve Optik CRM · Oluşturulma: ${new Date().toLocaleString('tr-TR')}</p>
+<body>
+  <div class="sheet">
+    <div class="toolbar no-print">
+      <div style="font-size:13px;color:#64748b;font-weight:600;">Bu rapor yazdırma önizlemesinde en iyi görünümü sağlar.</div>
+      <button onclick="window.print()">PDF Olarak Yazdır / Kaydet</button>
+    </div>
+
+    <div class="cover">
+      <div class="eyebrow">Merve Optik · Saha Performans Raporu</div>
+      <h1>${esc(periodMeta.shortLabel)}</h1>
+      <p class="sub">Rapor kapsamı: ${esc(rangeLabel)}</p>
+      <div class="meta">
+        <div>Oluşturulma Tarihi<strong>${new Date().toLocaleString('tr-TR')}</strong></div>
+        <div>Dönem<strong>${esc(periodMeta.label)}</strong></div>
+        <div>Aktif Temsilci<strong>${activeRepCount}</strong></div>
       </div>
-      <button onclick="window.print()" class="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 shrink-0">PDF Olarak Yazdır</button>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 mb-8">
-        <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100"><p class="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-1">Toplam Ziyaret</p><p class="text-2xl sm:text-3xl font-black">${visits.length}</p></div>
-        <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100"><p class="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-1">Bekleyen Plan</p><p class="text-2xl sm:text-3xl font-black">${plans.length}</p></div>
-        <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100"><p class="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-1">Doktor Ziyareti</p><p class="text-2xl sm:text-3xl font-black">${typeMap.Doktor}</p></div>
-        <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100"><p class="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-1">Optik Ziyareti</p><p class="text-2xl sm:text-3xl font-black">${typeMap.Optik}</p></div>
-        <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100"><p class="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-1">Aktif Temsilci</p><p class="text-2xl sm:text-3xl font-black">${new Set([...visits.map(v=>v.repName), ...plans.map(p=>p.repName)]).size}</p></div>
+    <div class="exec">
+      <h2>Yönetici Özeti</h2>
+      <p>
+        Seçilen dönemde saha ekibi toplam <b>${totalVisits}</b> ziyaret gerçekleştirmiş ve <b>${totalPlans}</b> yeni rut planlamıştır.
+        ${activeRepCount > 0 ? `Görev alan <b>${activeRepCount}</b> temsilcinin ortalama ziyaret sayısı <b>${avgVisitsPerRep}</b> olarak gerçekleşmiştir.` : ''}
+        ${topRep ? ` En yüksek performansı <b>${esc(topRep.name)}</b> göstermiş olup, bu dönemde <b>${topRep.visitCount}</b> ziyaret kaydetmiştir.` : ''}
+        ${topCity ? ` Ziyaretler coğrafi olarak en çok <b>${esc(topCity[0])}</b> bölgesinde yoğunlaşmıştır (<b>${topCity[1]}</b> ziyaret).` : ''}
+        ${totalVisits > 0 ? ` Ziyaretlerin <b>%${doctorPct}</b>'i doktor, <b>%${opticPct}</b>'i optik/optisyen kontakları kapsamaktadır.` : ''}
+      </p>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-            <h3 class="text-sm font-bold text-slate-500 uppercase mb-4">Temsilci Bazlı Ziyaret</h3>
-            ${visits.length === 0 ? '<p class="text-center text-slate-400 py-10">Veri yok</p>' : '<canvas id="repVisitChart" height="220"></canvas>'}
+    <div class="kpi-grid">
+        <div class="kpi"><div class="label">Toplam Ziyaret</div><div class="value">${totalVisits}</div></div>
+        <div class="kpi"><div class="label">Planlanan Rut</div><div class="value">${totalPlans}</div></div>
+        <div class="kpi"><div class="label">Doktor Ziyareti</div><div class="value">${typeMap.Doktor}</div></div>
+        <div class="kpi"><div class="label">Optik Ziyareti</div><div class="value">${typeMap.Optik}</div></div>
+        <div class="kpi"><div class="label">Aktif Temsilci</div><div class="value">${activeRepCount}</div></div>
+    </div>
+
+    <div class="grid2">
+        <div class="card">
+            <h3>Temsilci Bazlı Ziyaret Sayısı</h3>
+            ${reportVisits.length === 0 ? '<p class="empty">Bu dönemde ziyaret verisi yok</p>' : '<div class="chart-wrap"><canvas id="repVisitChart"></canvas></div>'}
         </div>
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-            <h3 class="text-sm font-bold text-slate-500 uppercase mb-4">Şehir Dağılımı</h3>
-            ${visits.length === 0 ? '<p class="text-center text-slate-400 py-10">Veri yok</p>' : '<canvas id="cityChart" height="220"></canvas>'}
+        <div class="card">
+            <h3>Şehir Dağılımı</h3>
+            ${reportVisits.length === 0 ? '<p class="empty">Bu dönemde ziyaret verisi yok</p>' : '<div class="chart-wrap"><canvas id="cityChart"></canvas></div>'}
         </div>
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-            <h3 class="text-sm font-bold text-slate-500 uppercase mb-4">Hekim / Optik Oranı</h3>
-            ${visits.length === 0 ? '<p class="text-center text-slate-400 py-10">Veri yok</p>' : '<canvas id="typeChart" height="220"></canvas>'}
+        <div class="card">
+            <h3>Hekim / Optik Oranı</h3>
+            ${reportVisits.length === 0 ? '<p class="empty">Bu dönemde ziyaret verisi yok</p>' : '<div class="chart-wrap"><canvas id="typeChart"></canvas></div>'}
         </div>
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-            <h3 class="text-sm font-bold text-slate-500 uppercase mb-4">Temsilci Bazlı Planlanan Rut</h3>
-            ${plans.length === 0 ? '<p class="text-center text-slate-400 py-10">Veri yok</p>' : '<canvas id="planChart" height="220"></canvas>'}
+        <div class="card">
+            <h3>Temsilci Bazlı Planlanan Rut</h3>
+            ${reportPlans.length === 0 ? '<p class="empty">Bu dönemde plan verisi yok</p>' : '<div class="chart-wrap"><canvas id="planChart"></canvas></div>'}
         </div>
     </div>
 
-    <h2 class="text-lg font-black text-slate-800 mb-3">Ziyaret Kayıtları</h2>
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-x-auto mb-10">
-        <table class="w-full text-left text-sm">
-            <thead class="bg-slate-50 text-slate-500 font-bold text-xs uppercase border-b border-slate-100">
-                <tr><th class="px-4 py-3">Tarih</th><th class="px-4 py-3">Temsilci</th><th class="px-4 py-3">Kişi</th><th class="px-4 py-3">Kurum</th><th class="px-4 py-3">Not</th></tr>
-            </thead>
-            <tbody>${visitRows || '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">Kayıt yok</td></tr>'}</tbody>
+    <h2 class="section-title">Temsilci Performans Özeti</h2>
+    <div class="table-card">
+        <table>
+            <thead><tr><th>Temsilci</th><th style="text-align:center">Ziyaret</th><th style="text-align:center">Planlanan Rut</th><th style="text-align:center">Şehir Sayısı</th><th style="text-align:center">Ünite Sayısı</th></tr></thead>
+            <tbody>${repSummaryRows || '<tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8;">Kayıt yok</td></tr>'}</tbody>
         </table>
     </div>
 
-    <h2 class="text-lg font-black text-slate-800 mb-3">Gelecek Planlar</h2>
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-x-auto">
-        <table class="w-full text-left text-sm">
-            <thead class="bg-slate-50 text-slate-500 font-bold text-xs uppercase border-b border-slate-100">
-                <tr><th class="px-4 py-3">Tarih</th><th class="px-4 py-3">Temsilci</th><th class="px-4 py-3">Ünite</th><th class="px-4 py-3">Şehir</th></tr>
-            </thead>
-            <tbody>${planRows || '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-400">Kayıt yok</td></tr>'}</tbody>
+    <h2 class="section-title">Ziyaret Kayıtları</h2>
+    <div class="table-card">
+        <table>
+            <thead><tr><th>Tarih</th><th>Temsilci</th><th>Kişi</th><th>Kurum</th><th>Not</th></tr></thead>
+            <tbody>${visitRows || '<tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8;">Kayıt yok</td></tr>'}</tbody>
         </table>
     </div>
 
-    <p class="text-center text-xs text-slate-400 mt-10">Merve Optik CRM</p>
+    <h2 class="section-title">Planlanan Rutlar</h2>
+    <div class="table-card">
+        <table>
+            <thead><tr><th>Tarih</th><th>Temsilci</th><th>Ünite</th><th>Şehir</th></tr></thead>
+            <tbody>${planRows || '<tr><td colspan="4" style="text-align:center;padding:24px;color:#94a3b8;">Kayıt yok</td></tr>'}</tbody>
+        </table>
+    </div>
+
+    <footer>
+        <strong>Merve Optik CRM</strong> — Saha Yönetim Sistemi tarafından otomatik olarak oluşturulmuştur.<br>
+        Bu rapor iç kullanım amaçlıdır ve gizlilik içerebilir.
+    </footer>
   </div>
 
   <script>
-    ${visits.length > 0 ? `
+    if (window.Chart && window.ChartDataLabels) { Chart.register(ChartDataLabels); }
+    const baseOpts = {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16, font: { size: 11, weight: '600' } } },
+            datalabels: { font: { weight: '700', size: 12 }, formatter: (v) => (v === 0 ? '' : v) }
+        }
+    };
+    ${reportVisits.length > 0 ? `
     new Chart(document.getElementById('repVisitChart'), {
         type: 'bar',
-        data: { labels: ${JSON.stringify(Object.keys(repVisitMap))}, datasets: [{ data: ${JSON.stringify(Object.values(repVisitMap))}, backgroundColor: '#3b82f6', borderRadius: 6 }] },
-        options: { plugins: { legend: { display: false } } }
+        data: { labels: ${JSON.stringify(Object.keys(repVisitMap))}, datasets: [{ label: 'Ziyaret', data: ${JSON.stringify(Object.values(repVisitMap))}, backgroundColor: '#2563eb', borderRadius: 6 }] },
+        options: { ...baseOpts, scales: { y: { beginAtZero:true, ticks:{ precision:0 } } }, plugins: { ...baseOpts.plugins, legend:{display:false}, datalabels: { ...baseOpts.plugins.datalabels, color:'#1e293b', anchor:'end', align:'top' } } }
     });
     new Chart(document.getElementById('cityChart'), {
         type: 'doughnut',
         data: { labels: ${JSON.stringify(Object.keys(cityMap))}, datasets: [{ data: ${JSON.stringify(Object.values(cityMap))}, backgroundColor: ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ef4444','#ec4899','#14b8a6'] }] },
-        options: { plugins: { legend: { position: 'bottom' } } }
+        options: { ...baseOpts, plugins: { ...baseOpts.plugins, datalabels: { ...baseOpts.plugins.datalabels, color:'#fff' } } }
     });
     new Chart(document.getElementById('typeChart'), {
         type: 'pie',
         data: { labels: ${JSON.stringify(Object.keys(typeMap))}, datasets: [{ data: ${JSON.stringify(Object.values(typeMap))}, backgroundColor: ['#6366f1','#3b82f6'] }] },
-        options: { plugins: { legend: { position: 'bottom' } } }
+        options: { ...baseOpts, plugins: { ...baseOpts.plugins, datalabels: { ...baseOpts.plugins.datalabels, color:'#fff' } } }
     });` : ''}
-    ${plans.length > 0 ? `
+    ${reportPlans.length > 0 ? `
     new Chart(document.getElementById('planChart'), {
         type: 'bar',
-        data: { labels: ${JSON.stringify(Object.keys(repPlanMap))}, datasets: [{ data: ${JSON.stringify(Object.values(repPlanMap))}, backgroundColor: '#f97316', borderRadius: 6 }] },
-        options: { indexAxis: 'y', plugins: { legend: { display: false } } }
+        data: { labels: ${JSON.stringify(Object.keys(repPlanMap))}, datasets: [{ label: 'Plan', data: ${JSON.stringify(Object.values(repPlanMap))}, backgroundColor: '#f97316', borderRadius: 6 }] },
+        options: { ...baseOpts, indexAxis: 'y', scales: { x: { beginAtZero:true, ticks:{ precision:0 } } }, plugins: { ...baseOpts.plugins, legend:{display:false}, datalabels: { ...baseOpts.plugins.datalabels, color:'#1e293b', anchor:'end', align:'right' } } }
     });` : ''}
   <\/script>
 </body>
@@ -673,9 +879,11 @@
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.setAttribute('download', `Performans_Raporu_${todayISO}.html`);
+                link.setAttribute('download', `Merve_Optik_${periodMeta.shortLabel.replace(/\s+/g,'_')}_${todayISO}.html`);
                 document.body.appendChild(link);
                 link.click(); document.body.removeChild(link);
+                setIsGeneratingReport(false);
+                showToast('Rapor indirildi.');
             };
             
             // Filtreler
@@ -1269,8 +1477,18 @@
                                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-rose-100 rounded-xl flex items-center justify-center mb-3"><Icon name="download" className="text-rose-600" size={24} /></div>
                                     <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">PERFORMANS RAPORU</p>
                                 </div>
-                                <div className="mt-2">
-                                    <button onClick={downloadFullReport} disabled={visits.length === 0 && plans.length === 0} className="w-full bg-rose-500 hover:bg-rose-600 text-white py-2.5 rounded-lg font-bold shadow-sm transition-colors text-xs disabled:opacity-50" title="Şık, grafikli raporu indir">Raporu İndir</button>
+                                <div className="mt-2 space-y-2">
+                                    <div className="relative">
+                                        <select className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-2.5 pr-8 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-400" value={reportPeriod} onChange={(e) => setReportPeriod(e.target.value)}>
+                                            <option value="month">Aylık Rapor</option>
+                                            <option value="quarter">3 Aylık Rapor</option>
+                                            <option value="all">Tüm Zamanlar</option>
+                                        </select>
+                                        <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-slate-400"><Icon name="chevron-down" size={14}/></div>
+                                    </div>
+                                    <button onClick={() => downloadFullReport(reportPeriod)} disabled={isGeneratingReport} className="w-full bg-rose-500 hover:bg-rose-600 text-white py-2.5 rounded-lg font-bold shadow-sm transition-colors text-xs disabled:opacity-50 flex items-center justify-center gap-1.5" title="Şık, grafikli ve dönemsel raporu indir">
+                                        <Icon name="download" size={14}/> {isGeneratingReport ? 'Hazırlanıyor...' : 'Raporu İndir'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
