@@ -5,11 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Merve Optik CRM</title>
     
-    <!-- HIZLANDIRMA: Sunuculara önceden bağlanarak indirme süresini kısaltır -->
-    <link rel="preconnect" href="https://unpkg.com">
-    <link rel="preconnect" href="https://cdn.tailwindcss.com">
-    <link rel="preconnect" href="https://www.gstatic.com">
-
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -23,10 +18,13 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- Firebase SDK (Compat Version - Works flawlessly on local files without CORS issues) -->
+    <!-- Firebase SDK (Compat Version) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+
+    <!-- YENİ: Chart.js (Grafikler için) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -34,30 +32,14 @@
         select { -webkit-appearance: none; -moz-appearance: none; appearance: none; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        /* Açılış Ekranı Animasyonları */
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
     </style>
 </head>
 <body class="bg-slate-100 text-gray-900 selection:bg-blue-200">
-    
-    <div id="root">
-        <!-- HIZLANDIRMA: Anında Yüklenen Açılış Ekranı (Splash Screen) -->
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f8fafc; font-family: sans-serif;">
-            <div style="width: 80px; height: 80px; border-radius: 24px; background: linear-gradient(135deg, #2563eb, #1e40af); display: flex; align-items: center; justify-content: center; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3); animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-            </div>
-            <h1 style="font-size: 24px; font-weight: 900; color: #1e293b; margin: 0; letter-spacing: -0.5px;">Merve Optik CRM</h1>
-            <p style="color: #64748b; font-weight: 500; margin-top: 8px; font-size: 14px;">Uygulama Yükleniyor...</p>
-            <div style="margin-top: 30px; width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-        </div>
-    </div>
+    <div id="root"></div>
 
     <script type="text/babel">
-        // Sizin Claude ile eklediğiniz güçlü İkon Düzeltmesi
-        const toPascalCase = (str) =>
-            str.replace(/(^\w|-\w)/g, (m) => m.replace('-', '').toUpperCase());
+        // --- İkon Düzeltmesi ---
+        const toPascalCase = (str) => str.replace(/(^\w|-\w)/g, (m) => m.replace('-', '').toUpperCase());
 
         const buildSvgNode = (node) => {
             const [tag, attrs, children] = node;
@@ -71,14 +53,9 @@
             const iconRef = React.useRef(null);
             React.useEffect(() => {
                 if (!iconRef.current || !window.lucide || !window.lucide.icons) return;
-
                 const pascalName = toPascalCase(name);
                 const iconNode = window.lucide.icons[pascalName];
-
-                if (!iconNode) {
-                    console.warn('Lucide ikonu bulunamadı:', name, '->', pascalName);
-                    return;
-                }
+                if (!iconNode) return;
 
                 const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                 svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
@@ -93,11 +70,9 @@
                 if (className) svg.setAttribute('class', className);
 
                 iconNode.forEach((child) => svg.appendChild(buildSvgNode(child)));
-
                 iconRef.current.innerHTML = '';
                 iconRef.current.appendChild(svg);
             }, [name, size, className, strokeWidth]);
-
             return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
         };
 
@@ -107,6 +82,44 @@
                 <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
         );
+
+        // YENİ: Grafik (Chart) Bileşeni
+        const SimpleChart = ({ type, data, options }) => {
+            const chartRef = React.useRef(null);
+            const chartInstance = React.useRef(null);
+
+            React.useEffect(() => {
+                if (!chartRef.current || !window.Chart) return;
+                
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                }
+
+                const ctx = chartRef.current.getContext('2d');
+                chartInstance.current = new window.Chart(ctx, {
+                    type: type,
+                    data: data,
+                    options: { 
+                        responsive: true, 
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 20 } }
+                        },
+                        ...options 
+                    }
+                });
+
+                return () => {
+                    if (chartInstance.current) chartInstance.current.destroy();
+                };
+            }, [type, data, options]);
+
+            return (
+                <div className="relative h-64 w-full">
+                    <canvas ref={chartRef}></canvas>
+                </div>
+            );
+        };
 
         // --- Sabit Kullanıcı Listesi ---
         const USERS = [
@@ -210,7 +223,6 @@
             const [isEditDoctorOpen, setIsEditDoctorOpen] = React.useState(false);
             const [editDoctorData, setEditDoctorData] = React.useState(null);
 
-            // Tarih filtreleri her zaman bugünden başlar
             const [repVisitDateFilter, setRepVisitDateFilter] = React.useState(todayISO);
             const [managerVisitDateFilter, setManagerVisitDateFilter] = React.useState(todayISO);
 
@@ -316,7 +328,7 @@
             const executeLogin = (profile) => {
                 setActiveProfile(profile);
                 localStorage.setItem('crm_active_profile', JSON.stringify(profile));
-                setActiveTab(profile.role === 'manager' ? 'manager-dashboard' : 'plans');
+                setActiveTab(profile.role === 'manager' ? 'manager-stats' : 'plans'); // Yönetici için istatistikleri açsın
                 setLoginStep('select_profile');
                 setSelectedProfileForLogin(null);
             };
@@ -332,31 +344,21 @@
                 const correctPassword = getPasswordFor(activeProfile.id);
 
                 if (currentPasswordInput !== correctPassword) {
-                    showToast('Mevcut şifreniz hatalı.', 'error');
-                    return;
+                    showToast('Mevcut şifreniz hatalı.', 'error'); return;
                 }
                 if (!newPasswordInput || newPasswordInput.trim().length < 3) {
-                    showToast('Yeni şifre en az 3 karakter olmalı.', 'error');
-                    return;
+                    showToast('Yeni şifre en az 3 karakter olmalı.', 'error'); return;
                 }
                 if (newPasswordInput !== confirmPasswordInput) {
-                    showToast('Yeni şifreler birbiriyle eşleşmiyor!', 'error');
-                    return;
+                    showToast('Yeni şifreler birbiriyle eşleşmiyor!', 'error'); return;
                 }
 
                 try {
-                    await db.collection('userCredentials').doc(activeProfile.id).set({
-                        password: newPasswordInput
-                    }, { merge: true });
-
+                    await db.collection('userCredentials').doc(activeProfile.id).set({ password: newPasswordInput }, { merge: true });
                     showToast('Şifreniz başarıyla güncellendi.');
                     setIsChangePasswordOpen(false);
-                    setCurrentPasswordInput('');
-                    setNewPasswordInput('');
-                    setConfirmPasswordInput('');
-                } catch (error) {
-                    showToast('Şifre değiştirilirken bir hata oluştu.', 'error');
-                }
+                    setCurrentPasswordInput(''); setNewPasswordInput(''); setConfirmPasswordInput('');
+                } catch (error) { showToast('Şifre değiştirilirken bir hata oluştu.', 'error'); }
             };
 
             const handleAddPlan = async (e) => {
@@ -383,9 +385,7 @@
                     setNewPlan({ unitId: '' });
                     setIsAddPlanOpen(false);
                     showToast('Plan başarıyla eklendi.');
-                } catch (error) {
-                    showToast('Plan eklenirken hata oluştu.', 'error');
-                }
+                } catch (error) { showToast('Plan eklenirken hata oluştu.', 'error'); }
             };
 
             const handleDeletePlan = async (planId) => {
@@ -397,17 +397,12 @@
 
             const handlePlanVisitSubmit = async (e) => {
                 e.preventDefault();
-                if (!planVisit.plan || !planVisit.doctorId) {
-                    showToast('Lütfen ziyaret ettiğiniz kontağı (kişiyi) seçin.', 'error'); return;
-                }
+                if (!planVisit.plan || !planVisit.doctorId) { showToast('Lütfen ziyaret ettiğiniz kontağı (kişiyi) seçin.', 'error'); return; }
                 const doctor = doctors.find(d => d.id === planVisit.doctorId);
                 if(!doctor) return;
 
                 const isDuplicate = visits.some(visit => visit.repId === activeProfile.id && visit.doctorId === doctor.id && visit.date === planVisit.plan.date);
-                if (isDuplicate) { 
-                    showToast('Bu kontağa bu güne zaten ziyaret girilmiş!', 'error'); 
-                    return; 
-                }
+                if (isDuplicate) { showToast('Bu kontağa bu güne zaten ziyaret girilmiş!', 'error'); return; }
 
                 try {
                     await db.collection('visits').add({
@@ -424,9 +419,7 @@
                     
                     setPlanVisit({ plan: null, doctorId: '', notes: '' });
                     showToast('Ziyaret başarıyla gerçekleşti!');
-                } catch (error) {
-                    showToast('Ziyaret kaydedilirken hata oluştu.', 'error');
-                }
+                } catch (error) { showToast('Ziyaret kaydedilirken hata oluştu.', 'error'); }
             };
 
             const handleAddUnit = async (e) => {
@@ -451,24 +444,14 @@
             const handleUpdateUnit = async (e) => {
                 e.preventDefault();
                 if (!editUnitData.name.trim() || !editUnitData.city.trim()) return;
-
                 try {
-                    await db.collection('units').doc(editUnitData.id).update({
-                        type: editUnitData.type,
-                        name: editUnitData.name,
-                        city: editUnitData.city
-                    });
-                    setIsEditUnitOpen(false);
-                    setEditUnitData(null);
-                    showToast('Ünite başarıyla güncellendi.');
-                } catch (error) { showToast('Güncelleme sırasında hata oluştu.', 'error'); }
+                    await db.collection('units').doc(editUnitData.id).update({ type: editUnitData.type, name: editUnitData.name, city: editUnitData.city });
+                    setIsEditUnitOpen(false); setEditUnitData(null); showToast('Ünite güncellendi.');
+                } catch (error) { showToast('Hata oluştu.', 'error'); }
             };
 
             const handleDeleteUnit = async (unitId) => {
-                try {
-                    await db.collection('units').doc(unitId).delete();
-                    showToast('Ünite silindi.');
-                } catch (error) {}
+                try { await db.collection('units').doc(unitId).delete(); showToast('Ünite silindi.'); } catch (error) {}
             };
 
             const handleAddDoctor = async (e) => {
@@ -511,25 +494,17 @@
                         hospital: selectedUnit.name,
                         city: selectedUnit.city
                     });
-                    setIsEditDoctorOpen(false);
-                    setEditDoctorData(null);
-                    showToast('Kontak başarıyla güncellendi.');
-                } catch (error) { showToast('Güncelleme sırasında hata oluştu.', 'error'); }
+                    setIsEditDoctorOpen(false); setEditDoctorData(null); showToast('Kontak güncellendi.');
+                } catch (error) { showToast('Hata oluştu.', 'error'); }
             };
 
             const handleDeleteDoctor = async (doctorId) => {
-                try {
-                    await db.collection('doctors').doc(doctorId).delete();
-                    showToast('Kontak silindi.');
-                } catch (error) {}
+                try { await db.collection('doctors').doc(doctorId).delete(); showToast('Kontak silindi.'); } catch (error) {}
             };
 
             const handleAddVisit = async (e) => {
                 e.preventDefault();
-                if (newVisit.date > todayISO) {
-                    showToast('İleri tarihli işlemleri lütfen "Planlarım" sekmesinden yapın.', 'error');
-                    return;
-                }
+                if (newVisit.date > todayISO) { showToast('İleri tarihli işlemleri "Planlarım" sekmesinden yapın.', 'error'); return; }
 
                 try {
                     const isDuplicate = visits.some(visit => visit.repId === activeProfile.id && visit.doctorId === visitingDoctor.id && visit.date === newVisit.date);
@@ -546,18 +521,13 @@
                         notes: newVisit.notes,
                         createdAt: Date.now()
                     });
-                    setVisitingDoctor(null);
-                    setIsQuickVisitOpen(false);
-                    setNewVisit({ date: todayISO, notes: '' });
+                    setVisitingDoctor(null); setIsQuickVisitOpen(false); setNewVisit({ date: todayISO, notes: '' });
                     showToast('Ziyaret başarıyla kaydedildi.');
                 } catch (error) { showToast('Hata oluştu.', 'error'); }
             };
 
             const handleDeleteVisit = async (visitId) => {
-                try {
-                    await db.collection('visits').doc(visitId).delete();
-                    showToast('Ziyaret silindi.');
-                } catch (error) {}
+                try { await db.collection('visits').doc(visitId).delete(); showToast('Ziyaret silindi.'); } catch (error) {}
             };
 
             const downloadReport = () => {
@@ -579,13 +549,11 @@
                 link.href = url;
                 link.setAttribute('download', `Ziyaret_Raporu_${todayISO}.csv`);
                 document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                link.click(); document.body.removeChild(link);
             };
 
             const downloadPlansReport = () => {
                 if (plans.length === 0) return;
-                
                 const grouped = {};
                 plans.forEach(plan => {
                     if (!grouped[plan.repName]) grouped[plan.repName] = {};
@@ -606,13 +574,7 @@
                         const formattedDate = new Date(date).toLocaleDateString('tr-TR');
                         const hastaneler = grouped[rep][date].hastane.join(', ');
                         const optikler = grouped[rep][date].optik.join(', ');
-
-                        csvData.push([
-                            `"${rep}"`,
-                            `"${formattedDate}"`,
-                            `"${hastaneler}"`,
-                            `"${optikler}"`
-                        ].join(';'));
+                        csvData.push([`"${rep}"`, `"${formattedDate}"`, `"${hastaneler}"`, `"${optikler}"`].join(';'));
                     });
                 });
 
@@ -623,8 +585,7 @@
                 link.href = url;
                 link.setAttribute('download', `Plan_Raporu_${todayISO}.csv`);
                 document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                link.click(); document.body.removeChild(link);
             };
 
             // Filtreler
@@ -697,10 +658,7 @@
                 <div className="fixed inset-0 bg-black/60 z-[80] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm transition-all">
                     <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6">
                         <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden"></div>
-                        <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg mr-3"><Icon name="key" size={20} /></div>
-                            Şifre Değiştir
-                        </h2>
+                        <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><div className="p-2 bg-blue-100 text-blue-600 rounded-lg mr-3"><Icon name="key" size={20} /></div> Şifre Değiştir</h2>
                         <form onSubmit={handleChangePassword} className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">MEVCUT ŞİFRE</label>
@@ -727,16 +685,11 @@
                 <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm transition-all">
                     <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6">
                         <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden"></div>
-                        <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                            <div className="p-2 bg-orange-100 text-orange-600 rounded-lg mr-3"><Icon name="calendar" size={20} /></div> 
-                            Plana Ünite Ekle
-                        </h2>
-                        
+                        <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><div className="p-2 bg-orange-100 text-orange-600 rounded-lg mr-3"><Icon name="calendar" size={20} /></div> Plana Ünite Ekle</h2>
                         <div className="mb-4">
                             <p className="text-sm font-bold text-slate-500 mb-1">Seçili Tarih</p>
                             <p className="text-lg font-black text-slate-800">{new Date(selectedDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'long' })}</p>
                         </div>
-
                         <form onSubmit={handleAddPlan} className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">ZİYARET EDİLECEK ÜNİTE</label>
@@ -765,16 +718,11 @@
                     <div className="fixed inset-0 bg-black/60 z-[70] flex items-end sm:items-center justify-center sm:p-4 backdrop-blur-sm">
                         <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6">
                             <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden"></div>
-                            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg mr-3"><Icon name="calendar-check" size={20} /></div> 
-                                Planı Gerçekleştir
-                            </h2>
-                            
+                            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center"><div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg mr-3"><Icon name="calendar-check" size={20} /></div> Planı Gerçekleştir</h2>
                             <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100">
                                 <span className="font-bold text-slate-800 block text-lg leading-tight mb-1">{planVisit.plan.unitName}</span>
                                 <span className="text-sm text-slate-500 flex items-center gap-1"><Icon name="map-pin" size={12}/> {planVisit.plan.unitCity}</span>
                             </div>
-
                             {unitDoctors.length === 0 ? (
                                 <div className="text-center py-6">
                                     <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3"><Icon name="users" size={24}/></div>
@@ -1006,7 +954,7 @@
                 <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6 pb-24 sm:pb-0">
                     <div className="hidden sm:flex bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 p-1 mb-6">
                         <button onClick={() => setActiveTab('plans')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'plans' ? 'bg-orange-50 text-orange-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="calendar-days" size={18} /> Planlarım</button>
-                        <button onClick={() => setActiveTab('units')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'units' ? 'bg-purple-50 text-purple-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="building" size={18} /> Üniteler ({myUnits.length})</button>
+                        <button onClick={() => setActiveTab('units')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'units' ? 'bg-purple-50 text-purple-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="building" size={18} /> Üniteler</button>
                         <button onClick={() => setActiveTab('doctors')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'doctors' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="users" size={18} /> Kontaklar</button>
                         <button onClick={() => setActiveTab('my-visits')} className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all ${activeTab === 'my-visits' ? 'bg-emerald-50 text-emerald-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="clipboard-list" size={18} /> Ziyaretler</button>
                     </div>
@@ -1045,7 +993,7 @@
                                             </div>
                                             <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
                                                 <button onClick={() => handleDeletePlan(plan.id)} className="p-3 text-red-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 rounded-xl transition-colors shrink-0" title="Planı İptal Et"><Icon name="x" size={20} /></button>
-                                                <button onClick={() => setPlanVisit({ plan: plan, doctorId: '', notes: '' })} className="flex-1 sm:flex-none px-4 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors shadow-sm"><Icon name="calendar-plus" size={18}/> Ziyaret Ekle</button>
+                                                <button onClick={() => setPlanVisit({ plan: plan, doctorId: '', notes: '' })} className="flex-1 sm:flex-none px-4 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors shadow-sm"><Icon name="check-circle-2" size={18}/> Ziyaret Ekle</button>
                                             </div>
                                         </div>
                                     ))}
@@ -1169,172 +1117,224 @@
                 </div>
             );
 
-            const renderManagerDashboard = () => (
-                <div className="max-w-6xl mx-auto space-y-6 pb-24 sm:pb-0">
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
-                        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-orange-100 rounded-xl flex items-center justify-center mb-3"><Icon name="calendar" className="text-orange-600" size={24} /></div>
-                            <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">BEKLEYEN PLANLAR</p>
-                            <p className="text-2xl sm:text-3xl font-black text-gray-800">{plans.length}</p>
-                        </div>
-                        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-3"><Icon name="activity" className="text-blue-600" size={24} /></div>
-                            <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">ZİYARETLER</p>
-                            <p className="text-2xl sm:text-3xl font-black text-gray-800">{visits.length}</p>
-                        </div>
-                        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-3"><Icon name="building" className="text-purple-600" size={24} /></div>
-                            <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">ÜNİTELER</p>
-                            <p className="text-2xl sm:text-3xl font-black text-gray-800">{units.length}</p>
-                        </div>
-                        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-emerald-100 rounded-xl flex items-center justify-center mb-3"><Icon name="users" className="text-emerald-600" size={24} /></div>
-                            <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">KONTAKLAR</p>
-                            <p className="text-2xl sm:text-3xl font-black text-gray-800">{doctors.length}</p>
-                        </div>
-                        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
-                            <div>
-                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-rose-100 rounded-xl flex items-center justify-center mb-3"><Icon name="download" className="text-rose-600" size={24} /></div>
-                                <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">EXCEL RAPORLARI</p>
-                            </div>
-                            <div className="flex gap-2 mt-2">
-                                <button onClick={downloadReport} disabled={visits.length === 0} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2.5 rounded-lg font-bold shadow-sm transition-colors text-xs disabled:opacity-50" title="Geçmiş ziyaretleri indir">Ziyaretler</button>
-                                <button onClick={downloadPlansReport} disabled={plans.length === 0} className="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-lg font-bold shadow-sm transition-colors text-xs disabled:opacity-50" title="Gelecek planları indir">Planlar</button>
-                            </div>
-                        </div>
-                    </div>
+            const renderManagerDashboard = () => {
+                // GRAFİK VERİLERİ (İSTATİSTİKLER İÇİN)
+                const repVisitsMap = {};
+                visits.forEach(v => { repVisitsMap[v.repName] = (repVisitsMap[v.repName] || 0) + 1; });
+                const chartRepVisits = {
+                    labels: Object.keys(repVisitsMap),
+                    datasets: [{ label: 'Ziyaret Sayısı', data: Object.values(repVisitsMap), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'], borderRadius: 6 }]
+                };
 
-                    <div className="flex overflow-x-auto hide-scrollbar bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-4 gap-1 snap-x">
-                        <button onClick={() => setActiveTab('manager-dashboard')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-dashboard' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="activity" size={18} /> Ziyaret Akışı</button>
-                        <button onClick={() => setActiveTab('manager-plans')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-plans' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="calendar" size={18} /> Ekip Planları</button>
-                        <button onClick={() => setActiveTab('manager-units')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-units' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="building" size={18} /> Üniteler</button>
-                        <button onClick={() => setActiveTab('manager-doctors')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-doctors' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="users" size={18} /> Kontaklar</button>
-                    </div>
+                const repPlansMap = {};
+                plans.forEach(p => { repPlansMap[p.repName] = (repPlansMap[p.repName] || 0) + 1; });
+                const chartRepPlans = {
+                    labels: Object.keys(repPlansMap),
+                    datasets: [{ label: 'Planlanan Rut Sayısı', data: Object.values(repPlansMap), backgroundColor: ['#f97316', '#6366f1', '#eab308', '#a855f7'], borderRadius: 6 }]
+                };
 
-                    {activeTab === 'manager-plans' && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                            <div className="p-4 sm:p-6 border-b border-gray-100 bg-slate-50/50 flex justify-between items-center">
-                                <h2 className="text-lg font-bold text-gray-800">Ekibin Gelecek Planları</h2>
-                            </div>
-                            <div className="block sm:hidden divide-y divide-gray-100">
-                                {plans.length === 0 ? <div className="p-8 text-center text-gray-500">Plan bulunmuyor.</div> : plans.map(plan => (
-                                    <div key={plan.id} className="p-4 space-y-3">
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded">{new Date(plan.date).toLocaleDateString('tr-TR')}</span>
-                                            <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded flex items-center gap-1.5"><Icon name="user-circle" size={14}/> {plan.repName.split(' ')[0]}</span>
-                                        </div>
-                                        <p className="font-bold text-gray-900 flex items-center gap-2">{plan.unitName}</p>
-                                        <p className="text-xs text-gray-500 font-medium">{plan.unitCity}</p>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="hidden sm:block overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
-                                        <tr><th className="px-6 py-4">Tarih</th><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Planlanan Ünite</th><th className="px-6 py-4">Şehir</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {plans.map(plan => (
-                                            <tr key={plan.id} className="hover:bg-slate-50/50 transition-colors">
-                                                <td className="px-6 py-4 font-medium text-gray-900"><span className="bg-orange-100 text-orange-800 px-2 py-1 rounded font-bold text-xs">{new Date(plan.date).toLocaleDateString('tr-TR')}</span></td>
-                                                <td className="px-6 py-4"><span className="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">{plan.repName}</span></td>
-                                                <td className="px-6 py-4 font-bold text-gray-800">{plan.unitName}</td>
-                                                <td className="px-6 py-4 text-gray-500">{plan.unitCity}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
+                const cityMap = {};
+                visits.forEach(v => {
+                    const docInfo = doctors.find(d => d.id === v.doctorId);
+                    const city = docInfo ? docInfo.city : 'Bilinmeyen';
+                    cityMap[city] = (cityMap[city] || 0) + 1;
+                });
+                const chartCityDist = {
+                    labels: Object.keys(cityMap),
+                    datasets: [{ data: Object.values(cityMap), backgroundColor: ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'], borderWidth: 0 }]
+                };
 
-                    {activeTab === 'manager-dashboard' && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                            <div className="p-4 sm:p-6 border-b border-gray-100 bg-slate-50/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-                                <h2 className="text-lg font-bold text-gray-800">
-                                    Son Ziyaret Kayıtları
-                                    {managerVisitDateFilter && <span className="ml-2 text-sm font-bold text-slate-500">({filteredManagerVisits.length} kayıt)</span>}
-                                </h2>
-                                <div className="flex items-center gap-2">
-                                    <input type="date" max={todayISO} className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-slate-800 outline-none text-sm font-medium text-gray-700" value={managerVisitDateFilter} onChange={(e) => setManagerVisitDateFilter(e.target.value)} />
-                                    {managerVisitDateFilter !== todayISO && <button onClick={() => setManagerVisitDateFilter(todayISO)} className="px-3 py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm active:scale-95 transition-all">Bugüne Dön</button>}
+                const typeMap = { 'Optik': 0, 'Doktor': 0 };
+                visits.forEach(v => { typeMap[v.doctorType === 'optik' ? 'Optik' : 'Doktor']++; });
+                const chartTypeDist = {
+                    labels: Object.keys(typeMap),
+                    datasets: [{ data: Object.values(typeMap), backgroundColor: ['#6366f1', '#3b82f6'], borderWidth: 0 }]
+                };
+
+                return (
+                    <div className="max-w-6xl mx-auto space-y-6 pb-24 sm:pb-0">
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
+                            <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-orange-100 rounded-xl flex items-center justify-center mb-3"><Icon name="calendar" className="text-orange-600" size={24} /></div>
+                                <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">BEKLEYEN PLANLAR</p>
+                                <p className="text-2xl sm:text-3xl font-black text-gray-800">{plans.length}</p>
+                            </div>
+                            <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-3"><Icon name="activity" className="text-blue-600" size={24} /></div>
+                                <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">ZİYARETLER</p>
+                                <p className="text-2xl sm:text-3xl font-black text-gray-800">{visits.length}</p>
+                            </div>
+                            <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-3"><Icon name="building" className="text-purple-600" size={24} /></div>
+                                <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">ÜNİTELER</p>
+                                <p className="text-2xl sm:text-3xl font-black text-gray-800">{units.length}</p>
+                            </div>
+                            <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-emerald-100 rounded-xl flex items-center justify-center mb-3"><Icon name="users" className="text-emerald-600" size={24} /></div>
+                                <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">KONTAKLAR</p>
+                                <p className="text-2xl sm:text-3xl font-black text-gray-800">{doctors.length}</p>
+                            </div>
+                            <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                                <div>
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-rose-100 rounded-xl flex items-center justify-center mb-3"><Icon name="download" className="text-rose-600" size={24} /></div>
+                                    <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">EXCEL RAPORLARI</p>
+                                </div>
+                                <div className="flex gap-2 mt-2">
+                                    <button onClick={downloadReport} disabled={visits.length === 0} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2.5 rounded-lg font-bold shadow-sm transition-colors text-xs disabled:opacity-50" title="Geçmiş ziyaretleri indir">Ziyaretler</button>
+                                    <button onClick={downloadPlansReport} disabled={plans.length === 0} className="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-lg font-bold shadow-sm transition-colors text-xs disabled:opacity-50" title="Gelecek planları indir">Planlar</button>
                                 </div>
                             </div>
-                            <div className="hidden sm:block overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
-                                        <tr><th className="px-6 py-4">Tarih</th><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Kişi / Kurum Adı</th><th className="px-6 py-4">Kurum / Hastane</th><th className="px-6 py-4">Notlar</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {filteredManagerVisits.length === 0 ? (
-                                            <tr><td colSpan="5" className="px-6 py-12 text-center text-gray-500">{managerVisitDateFilter === todayISO ? 'Bugün için henüz ziyaret kaydı bulunmuyor.' : 'Bu tarihte ziyaret bulunmuyor.'}</td></tr>
-                                        ) : (
-                                            filteredManagerVisits.map(visit => (
-                                                <tr key={visit.id} className="hover:bg-slate-50/50">
-                                                    <td className="px-6 py-4 font-medium text-gray-900">{new Date(visit.date).toLocaleDateString('tr-TR')}</td>
-                                                    <td className="px-6 py-4"><span className="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">{visit.repName}</span></td>
-                                                    <td className="px-6 py-4 font-bold text-gray-800">{visit.doctorName}</td>
-                                                    <td className="px-6 py-4 text-gray-600">{visit.doctorHospital}</td>
-                                                    <td className="px-6 py-4 text-gray-600 max-w-md"><div className="line-clamp-2">{visit.notes || '-'}</div></td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
                         </div>
-                    )}
-                    
-                    {activeTab === 'manager-units' && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                            <div className="hidden sm:block overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
-                                        <tr><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Tür</th><th className="px-6 py-4">Ünite</th><th className="px-6 py-4">Şehir</th><th className="px-6 py-4 text-right">İşlem</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {units.map(u => (
-                                            <tr key={u.id}>
-                                                <td className="px-6 py-4">{u.addedByName}</td><td className="px-6 py-4 font-medium">{u.type === 'optik' ? 'Optik' : 'Hastane'}</td><td className="px-6 py-4 font-bold">{u.name}</td><td className="px-6 py-4">{u.city}</td>
-                                                <td className="px-6 py-4 text-right"><button onClick={()=>handleDeleteUnit(u.id)} className="text-red-400 hover:text-red-600"><Icon name="trash-2" size={20}/></button></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
 
-                    {activeTab === 'manager-doctors' && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                            <div className="relative border-b border-gray-100">
-                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><Icon name="search" size={20} className="text-gray-400" /></div>
-                                <input type="text" className="block w-full pl-12 pr-4 py-4 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-slate-800 text-base outline-none transition-all" placeholder="Doktor, optik, kurum veya temsilci ara..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                            </div>
-                            <div className="hidden sm:block overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
-                                        <tr><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Tür</th><th className="px-6 py-4">Kişi</th><th className="px-6 py-4">Ünite</th><th className="px-6 py-4">Şehir</th><th className="px-6 py-4 text-right">İşlem</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {filteredDoctors.map(d => (
-                                            <tr key={d.id}>
-                                                <td className="px-6 py-4">{d.addedByName}</td><td className="px-6 py-4 font-medium">{d.type === 'optik' ? 'Optik' : 'Doktor'}</td><td className="px-6 py-4 font-bold">{d.name}</td><td className="px-6 py-4">{d.hospital}</td><td className="px-6 py-4">{d.city}</td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        <button onClick={() => { setEditDoctorData(d); setIsEditDoctorOpen(true); }} className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Icon name="edit" size={20} /></button>
-                                                        <button onClick={()=>handleDeleteDoctor(d.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Icon name="trash-2" size={20}/></button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                        <div className="flex overflow-x-auto hide-scrollbar bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-4 gap-1 snap-x">
+                            <button onClick={() => setActiveTab('manager-stats')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-stats' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="pie-chart" size={18} /> İstatistikler</button>
+                            <button onClick={() => setActiveTab('manager-dashboard')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-dashboard' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="activity" size={18} /> Ziyaret Akışı</button>
+                            <button onClick={() => setActiveTab('manager-plans')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-plans' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="calendar" size={18} /> Ekip Planları</button>
+                            <button onClick={() => setActiveTab('manager-units')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-units' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="building" size={18} /> Üniteler</button>
+                            <button onClick={() => setActiveTab('manager-doctors')} className={`min-w-fit flex-1 py-3 px-4 text-sm font-bold rounded-lg flex justify-center items-center gap-2 transition-all snap-center ${activeTab === 'manager-doctors' ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="users" size={18} /> Kontaklar</button>
                         </div>
-                    )}
-                </div>
-            );
+
+                        {activeTab === 'manager-stats' && (
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                    <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-100 pb-3 flex items-center gap-2"><Icon name="bar-chart-2" size={16} className="text-blue-500"/> Temsilci Ziyaret Performansı</h3>
+                                    {visits.length === 0 ? <p className="text-center text-gray-400 py-10">Henüz veri yok</p> : <SimpleChart type="bar" data={chartRepVisits} />}
+                                </div>
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                    <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-100 pb-3 flex items-center gap-2"><Icon name="pie-chart" size={16} className="text-purple-500"/> Şehir (İl) Bazlı Ziyaret Dağılımı</h3>
+                                    {visits.length === 0 ? <p className="text-center text-gray-400 py-10">Henüz veri yok</p> : <SimpleChart type="doughnut" data={chartCityDist} />}
+                                </div>
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                    <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-100 pb-3 flex items-center gap-2"><Icon name="target" size={16} className="text-indigo-500"/> Hekim / Optik Ziyaret Oranı</h3>
+                                    {visits.length === 0 ? <p className="text-center text-gray-400 py-10">Henüz veri yok</p> : <SimpleChart type="pie" data={chartTypeDist} />}
+                                </div>
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                    <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-100 pb-3 flex items-center gap-2"><Icon name="calendar-days" size={16} className="text-orange-500"/> Temsilci Gelecek Rut Planları</h3>
+                                    {plans.length === 0 ? <p className="text-center text-gray-400 py-10">Henüz veri yok</p> : <SimpleChart type="bar" data={chartRepPlans} />}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'manager-plans' && (
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                <div className="p-4 sm:p-6 border-b border-gray-100 bg-slate-50/50 flex justify-between items-center">
+                                    <h2 className="text-lg font-bold text-gray-800">Ekibin Gelecek Planları</h2>
+                                </div>
+                                <div className="block sm:hidden divide-y divide-gray-100">
+                                    {plans.length === 0 ? <div className="p-8 text-center text-gray-500">Plan bulunmuyor.</div> : plans.map(plan => (
+                                        <div key={plan.id} className="p-4 space-y-3">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded">{new Date(plan.date).toLocaleDateString('tr-TR')}</span>
+                                                <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded flex items-center gap-1.5"><Icon name="user-circle" size={14}/> {plan.repName.split(' ')[0]}</span>
+                                            </div>
+                                            <p className="font-bold text-gray-900 flex items-center gap-2">{plan.unitName}</p>
+                                            <p className="text-xs text-gray-500 font-medium">{plan.unitCity}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="hidden sm:block overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
+                                            <tr><th className="px-6 py-4">Tarih</th><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Planlanan Ünite</th><th className="px-6 py-4">Şehir</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {plans.map(plan => (
+                                                <tr key={plan.id} className="hover:bg-slate-50/50 transition-colors">
+                                                    <td className="px-6 py-4 font-medium text-gray-900"><span className="bg-orange-100 text-orange-800 px-2 py-1 rounded font-bold text-xs">{new Date(plan.date).toLocaleDateString('tr-TR')}</span></td>
+                                                    <td className="px-6 py-4"><span className="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">{plan.repName}</span></td>
+                                                    <td className="px-6 py-4 font-bold text-gray-800">{plan.unitName}</td>
+                                                    <td className="px-6 py-4 text-gray-500">{plan.unitCity}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'manager-dashboard' && (
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                <div className="p-4 sm:p-6 border-b border-gray-100 bg-slate-50/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                                    <h2 className="text-lg font-bold text-gray-800">
+                                        Son Ziyaret Kayıtları
+                                        {managerVisitDateFilter && <span className="ml-2 text-sm font-bold text-slate-500">({filteredManagerVisits.length} kayıt)</span>}
+                                    </h2>
+                                    <div className="flex items-center gap-2">
+                                        <input type="date" max={todayISO} className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-slate-800 outline-none text-sm font-medium text-gray-700" value={managerVisitDateFilter} onChange={(e) => setManagerVisitDateFilter(e.target.value)} />
+                                        {managerVisitDateFilter && <button onClick={() => setManagerVisitDateFilter('')} className="px-3 py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm active:scale-95 transition-all">Temizle</button>}
+                                    </div>
+                                </div>
+                                <div className="hidden sm:block overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
+                                            <tr><th className="px-6 py-4">Tarih</th><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Kişi / Kurum Adı</th><th className="px-6 py-4">Kurum / Hastane</th><th className="px-6 py-4">Notlar</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {filteredManagerVisits.length === 0 ? (
+                                                <tr><td colSpan="5" className="px-6 py-12 text-center text-gray-500">{managerVisitDateFilter ? 'Bu tarihte ziyaret bulunamadı.' : 'Sistemde henüz kayıt bulunmuyor.'}</td></tr>
+                                            ) : (
+                                                filteredManagerVisits.map(visit => (
+                                                    <tr key={visit.id} className="hover:bg-slate-50/50">
+                                                        <td className="px-6 py-4 font-medium text-gray-900">{new Date(visit.date).toLocaleDateString('tr-TR')}</td>
+                                                        <td className="px-6 py-4"><span className="font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">{visit.repName}</span></td>
+                                                        <td className="px-6 py-4 font-bold text-gray-800">{visit.doctorName}</td>
+                                                        <td className="px-6 py-4 text-gray-600">{visit.doctorHospital}</td>
+                                                        <td className="px-6 py-4 text-gray-600 max-w-md"><div className="line-clamp-2">{visit.notes || '-'}</div></td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {activeTab === 'manager-units' && (
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                <div className="hidden sm:block overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
+                                            <tr><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Tür</th><th className="px-6 py-4">Ünite</th><th className="px-6 py-4">Şehir</th><th className="px-6 py-4 text-right">İşlem</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {units.map(u => (
+                                                <tr key={u.id}>
+                                                    <td className="px-6 py-4">{u.addedByName}</td><td className="px-6 py-4 font-medium capitalize">{u.type}</td><td className="px-6 py-4 font-bold">{u.name}</td><td className="px-6 py-4">{u.city}</td>
+                                                    <td className="px-6 py-4 text-right"><button onClick={()=>handleDeleteUnit(u.id)} className="text-red-400 hover:text-red-600"><Icon name="trash-2" size={20}/></button></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'manager-doctors' && (
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                <div className="relative border-b border-gray-100">
+                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><Icon name="search" size={20} className="text-gray-400" /></div>
+                                    <input type="text" className="block w-full pl-12 pr-4 py-4 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-slate-800 text-base outline-none transition-all" placeholder="Doktor, optik, kurum veya temsilci ara..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                                </div>
+                                <div className="hidden sm:block overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-wider border-b border-gray-100">
+                                            <tr><th className="px-6 py-4">Temsilci</th><th className="px-6 py-4">Tür</th><th className="px-6 py-4">Kişi</th><th className="px-6 py-4">Ünite</th><th className="px-6 py-4">Şehir</th><th className="px-6 py-4 text-right">İşlem</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {filteredDoctors.map(d => (
+                                                <tr key={d.id}>
+                                                    <td className="px-6 py-4">{d.addedByName}</td><td className="px-6 py-4 font-medium capitalize">{d.type}</td><td className="px-6 py-4 font-bold">{d.name}</td><td className="px-6 py-4">{d.hospital}</td><td className="px-6 py-4">{d.city}</td>
+                                                    <td className="px-6 py-4 text-right"><button onClick={()=>handleDeleteDoctor(d.id)} className="text-red-400 hover:text-red-600"><Icon name="trash-2" size={20}/></button></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            };
 
             const renderLoadingSpinner = () => <div className="flex justify-center items-center h-full min-h-[50vh]"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
 
